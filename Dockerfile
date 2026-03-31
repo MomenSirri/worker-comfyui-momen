@@ -686,6 +686,15 @@ RUN /opt/venv/bin/python -m pip install --no-cache-dir \
     segment-anything \
     dill
 
+# Thin-layer custom node install: ComfyUI-Inpaint-CropAndStitch
+# Keep this in final-enhance so we can add/fix nodes without rebuilding heavy core layers.
+ARG CROP_STITCH_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/ComfyUI-Inpaint-CropAndStitch \
+ && git clone https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch.git /comfyui/custom_nodes/ComfyUI-Inpaint-CropAndStitch \
+ && cd /comfyui/custom_nodes/ComfyUI-Inpaint-CropAndStitch \
+ && if [ "${CROP_STITCH_COMMIT}" != "main" ]; then git checkout ${CROP_STITCH_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
 # Add runtime worker entrypoint files as the last layer for fast handler-only rebuilds
 COPY --from=runtime-files /start.sh /network_volume.py /handler.py /test_input.json /
 RUN chmod +x /start.sh
