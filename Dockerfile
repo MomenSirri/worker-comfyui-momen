@@ -695,6 +695,15 @@ RUN rm -rf /comfyui/custom_nodes/ComfyUI-Inpaint-CropAndStitch \
  && if [ "${CROP_STITCH_COMMIT}" != "main" ]; then git checkout ${CROP_STITCH_COMMIT}; fi \
  && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
 
+# Thin-layer custom node install: ComfyUI-KJNodes
+# Keep this in final-enhance so we can add/fix nodes without rebuilding heavy core layers.
+ARG KJNODES_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/ComfyUI-KJNodes \
+ && git clone https://github.com/kijai/ComfyUI-KJNodes.git /comfyui/custom_nodes/ComfyUI-KJNodes \
+ && cd /comfyui/custom_nodes/ComfyUI-KJNodes \
+ && if [ "${KJNODES_COMMIT}" != "main" ]; then git checkout ${KJNODES_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
 # Add runtime worker entrypoint files as the last layer for fast handler-only rebuilds
 COPY --from=runtime-files /start.sh /network_volume.py /handler.py /test_input.json /
 RUN chmod +x /start.sh
