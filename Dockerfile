@@ -1,5 +1,6 @@
 # Build argument for base image selection
 ARG BASE_IMAGE=nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
+ARG ENHANCE_CORE_IMAGE=final-enhance-core
 
 # Stage 1: Base image with common dependencies
 FROM ${BASE_IMAGE} AS base
@@ -88,15 +89,20 @@ RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 # Set the default command to run when starting the container
 CMD ["/start.sh"]
 
-# Keep runtime files in a dedicated stage so handler edits do not bust heavy build cache.
-FROM base AS runtime-files
-ADD src/start.sh src/network_volume.py handler.py test_input.json ./
-RUN chmod +x /start.sh
+# Keep runtime files in a tiny standalone stage so handler edits
+# do not pull in heavy CUDA/ComfyUI layers when rebuilding thin overlays.
+FROM scratch AS runtime-files
+COPY src/start.sh /start.sh
+COPY src/network_volume.py /network_volume.py
+COPY handler.py /handler.py
+COPY test_input.json /test_input.json
 
 # Stage 2: Download models
 FROM base AS downloader
 
 ARG HUGGINGFACE_ACCESS_TOKEN
+ARG CIVITAI_API_TOKEN
+ARG KREAMANIA_FP8_SHA256
 # Set default model type if none is provided
 ARG MODEL_TYPE=enhance
 
@@ -137,12 +143,32 @@ RUN set -eux; \
         https://huggingface.co/philz1337x/epicrealism/resolve/main/epicrealism_naturalSinRC1VAE.safetensors; \
       wget -nv -O /comfyui/models/diffusion_models/svdq-fp4_r32-flux.1-dev.safetensors \
         https://huggingface.co/nunchaku-ai/nunchaku-flux.1-dev/resolve/main/svdq-fp4_r32-flux.1-dev.safetensors; \
-      wget -nv -O /comfyui/models/diffusion_models/svdq-int4_r32-flux.1-dev.safetensors \
-        https://huggingface.co/nunchaku-ai/nunchaku-flux.1-dev/resolve/main/svdq-int4_r32-flux.1-dev.safetensors; \
       wget -nv -O /comfyui/models/diffusion_models/svdq-fp4_r32-fluxmania-legacy.safetensors \
         https://huggingface.co/spooknik/Fluxmania-SVDQ/resolve/main/svdq-fp4_r32-fluxmania-legacy.safetensors; \
-      wget -nv -O /comfyui/models/diffusion_models/svdq-int4_r32-fluxmania-legacy.safetensors \
-        https://huggingface.co/spooknik/Fluxmania-SVDQ/resolve/main/svdq-int4_r32-fluxmania-legacy.safetensors; \
+    fi
+
+# Fluxmania Kreamania (FP8) from Civitai
+# Model page: https://civitai.com/models/778691/fluxmania
+# Version: Kreamania (id=2106807), file: fluxmania_kreamania.safetensors
+RUN set -eu; \
+    if [ "$MODEL_TYPE" = "enhance" ]; then \
+      KREAMANIA_URL="https://civitai.com/api/download/models/2106807?type=Model&format=SafeTensor&size=full&fp=fp8"; \
+      KREAMANIA_OUT="/comfyui/models/diffusion_models/fluxmania_kreamania.safetensors"; \
+      if [ -n "${CIVITAI_API_TOKEN}" ]; then \
+        # Some Civitai redirects can reject the Authorization header on final storage URL.
+        # Prefer token query param, then fall back to public URL for public files.
+        if ! wget -nv -O "${KREAMANIA_OUT}" "${KREAMANIA_URL}&token=${CIVITAI_API_TOKEN}"; then \
+          echo "Tokenized Civitai download failed; retrying without token..." >&2; \
+          wget -nv -O "${KREAMANIA_OUT}" "${KREAMANIA_URL}"; \
+        fi; \
+      else \
+        wget -nv -O "${KREAMANIA_OUT}" "${KREAMANIA_URL}"; \
+      fi; \
+      if [ -n "${KREAMANIA_FP8_SHA256}" ]; then \
+        echo "${KREAMANIA_FP8_SHA256}  ${KREAMANIA_OUT}" | sha256sum -c -; \
+      else \
+        echo "WARNING: KREAMANIA_FP8_SHA256 not set; checksum verification skipped for fluxmania_kreamania.safetensors" >&2; \
+      fi; \
     fi
 
 RUN set -eux; \
@@ -381,8 +407,12 @@ RUN --mount=type=cache,target=/opt/wheels \
  && bash /tmp/install_llama_vision.sh \
  && rm -f /tmp/install_llama_vision.sh
 
+# Ensure ComfyUI core Python deps (e.g. alembic/comfy_aimdo) match the bundled ComfyUI version.
+RUN /opt/venv/bin/python -m pip install --no-cache-dir -r /comfyui/requirements.txt
+
 # Add runtime worker entrypoint files as the last layer for fast handler-only rebuilds
 COPY --from=runtime-files /start.sh /network_volume.py /handler.py /test_input.json /
+RUN chmod +x /start.sh
 CMD ["/start.sh"]
 
 
@@ -428,6 +458,14 @@ RUN rm -rf /comfyui/custom_nodes/ComfyUI_essentials \
  && git checkout FETCH_HEAD \
  && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
 
+# KJNodes (from snapshot) - installed via git clone pattern (same style as post-processing node)
+ARG KJNODES_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/ComfyUI-KJNodes \
+ && git clone https://github.com/kijai/ComfyUI-KJNodes.git /comfyui/custom_nodes/ComfyUI-KJNodes \
+ && cd /comfyui/custom_nodes/ComfyUI-KJNodes \
+ && if [ "${KJNODES_COMMIT}" != "main" ]; then git checkout ${KJNODES_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
 # WAS pinned
 ARG WAS_COMMIT=ea935d1044ae5a26efa54ebeb18fe9020af49a45
 RUN rm -rf /comfyui/custom_nodes/was-node-suite-comfyui \
@@ -441,15 +479,20 @@ RUN rm -rf /comfyui/custom_nodes/was-node-suite-comfyui \
 
 # Add runtime worker entrypoint files as the last layer for fast handler-only rebuilds
 COPY --from=runtime-files /start.sh /network_volume.py /handler.py /test_input.json /
+RUN chmod +x /start.sh
 CMD ["/start.sh"]
 
 
 
 
- # --- NEW: enhance image variant ---
-
-
-FROM final AS final-enhance
+# --- NEW: enhance image variant ---
+#
+# Build strategy:
+# 1) final-enhance-core = heavy layers (nodes, qwen/llama, model-adjacent setup)
+# 2) final-enhance      = thin overlay for dependency hotfixes + runtime entrypoint files
+#
+# This lets us iterate on dependency fixes without rebuilding heavy stages.
+FROM final AS final-enhance-core
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
@@ -627,6 +670,23 @@ RUN --mount=type=cache,target=/opt/wheels \
  && bash /tmp/install_llama_vision.sh \
  && rm -f /tmp/install_llama_vision.sh
 
+# Thin, rebuild-friendly overlay stage.
+# By default this uses the in-file core stage; for fast hotfix builds on fresh machines,
+# pass a prebuilt image, e.g.:
+#   --build-arg ENHANCE_CORE_IMAGE=momensirribrick/general-enhancement:core-v01
+FROM ${ENHANCE_CORE_IMAGE} AS final-enhance
+
+# Keep ComfyUI core deps synced with the checked out ComfyUI version.
+RUN /opt/venv/bin/python -m pip install --no-cache-dir -r /comfyui/requirements.txt
+
+# Runtime deps that are occasionally missing depending on custom node resolution.
+RUN /opt/venv/bin/python -m pip install --no-cache-dir \
+    piexif \
+    ultralytics \
+    segment-anything \
+    dill
+
 # Add runtime worker entrypoint files as the last layer for fast handler-only rebuilds
 COPY --from=runtime-files /start.sh /network_volume.py /handler.py /test_input.json /
+RUN chmod +x /start.sh
 CMD ["/start.sh"]

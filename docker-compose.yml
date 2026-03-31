@@ -1,7 +1,9 @@
 services:
   comfyui-worker:
-    image: momensirribrick/general-enhancement:v01
+    image: momensirribrick/general-enhancement:v04
     pull_policy: never
+    env_file:
+      - .env
     deploy:
       resources:
         reservations:

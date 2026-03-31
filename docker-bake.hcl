@@ -35,8 +35,23 @@ variable "HUGGINGFACE_ACCESS_TOKEN" {
   default = ""
 }
 
+variable "CIVITAI_API_TOKEN" {
+  default = ""
+}
+
+variable "KREAMANIA_FP8_SHA256" {
+  default = ""
+}
+
+variable "ENHANCE_CORE_IMAGE" {
+  # Default to local build stage alias; override with a pushed core image to skip heavy rebuilds.
+  # Example override:
+  # --set enhance.args.ENHANCE_CORE_IMAGE=momensirribrick/general-enhancement:core-v01
+  default = "final-enhance-core"
+}
+
 group "default" {
-  targets = ["base", "sdxl", "sd3", "flux1-schnell", "flux1-dev", "flux1-dev-fp8", "z-image-turbo", "flux2-klein", "base-cuda12-8-1", "flux2-klein-cuda12-8-1", "seedvr", "seedvr-cuda12-8-1", "enhance"]
+  targets = ["base", "sdxl", "sd3", "flux1-schnell", "flux1-dev", "flux1-dev-fp8", "z-image-turbo", "flux2-klein", "base-cuda12-8-1", "flux2-klein-cuda12-8-1", "seedvr", "seedvr-cuda12-8-1", "enhance-core", "enhance"]
 }
 
 target "base" {
@@ -267,8 +282,31 @@ target "enhance" {
     PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
     MODEL_TYPE = "enhance"
     HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
+    CIVITAI_API_TOKEN = "${CIVITAI_API_TOKEN}"
+    KREAMANIA_FP8_SHA256 = "${KREAMANIA_FP8_SHA256}"
+    ENHANCE_CORE_IMAGE = "${ENHANCE_CORE_IMAGE}"
 
   }
-  tags = ["${DOCKERHUB_REPO}/general-enhancement:v01"]
+  tags = ["${DOCKERHUB_REPO}/general-enhancement:${RELEASE_VERSION}"]
+  inherits = ["base"]
+}
+
+target "enhance-core" {
+  context = "."
+  dockerfile = "Dockerfile"
+  target = "final-enhance-core"
+  platforms = ["linux/amd64"]
+  args = {
+    BASE_IMAGE = "nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04"
+    COMFYUI_VERSION = "${COMFYUI_VERSION}"
+    CUDA_VERSION_FOR_COMFY = ""
+    ENABLE_PYTORCH_UPGRADE = "true"
+    PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
+    MODEL_TYPE = "enhance"
+    HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
+    CIVITAI_API_TOKEN = "${CIVITAI_API_TOKEN}"
+    KREAMANIA_FP8_SHA256 = "${KREAMANIA_FP8_SHA256}"
+  }
+  tags = ["${DOCKERHUB_REPO}/general-enhancement:core-${RELEASE_VERSION}"]
   inherits = ["base"]
 }

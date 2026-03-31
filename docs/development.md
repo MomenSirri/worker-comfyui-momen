@@ -37,6 +37,58 @@ Both tests will use the data from [`test_input.json`](../test_input.json), so ma
     pip install -r requirements.txt
     ```
 
+### Using `.env` for API keys and build args
+
+To avoid hardcoding secrets in commands:
+
+1. Copy `.env.example` to `.env`.
+2. Fill in values like `HUGGINGFACE_ACCESS_TOKEN`, `CIVITAI_API_TOKEN`, and optional `KREAMANIA_FP8_SHA256`.
+
+Load `.env` into your current shell before building:
+
+- **PowerShell**:
+  ```powershell
+  Get-Content .env | ForEach-Object {
+    if ($_ -match '^\s*#' -or $_ -match '^\s*$') { return }
+    $k, $v = $_ -split '=', 2
+    [Environment]::SetEnvironmentVariable($k.Trim(), $v.Trim(), 'Process')
+  }
+  ```
+
+- **Bash/Zsh**:
+  ```bash
+  set -a && source .env && set +a
+  ```
+
+### Fast rebuild strategy for `general-enhancement` (core + thin overlay)
+
+To avoid rebuilding CUDA + ComfyUI + all model downloads every time, the Dockerfile now splits
+`general-enhancement` into:
+
+1. **`final-enhance-core`** (heavy, built rarely)
+2. **`final-enhance`** (thin overlay, rebuilt for dependency fixes)
+
+Recommended release flow:
+
+1. Set release version in your shell:
+   ```bash
+   export RELEASE_VERSION=v04
+   ```
+   (PowerShell: `$env:RELEASE_VERSION = "v04"`)
+2. Build/push heavy core image once:
+   ```bash
+   docker buildx bake -f docker-bake.hcl enhance-core --push
+   ```
+2. Build/push thin final image referencing that core:
+   ```bash
+   docker buildx bake -f docker-bake.hcl enhance \
+     --set enhance.args.ENHANCE_CORE_IMAGE=momensirribrick/general-enhancement:core-v04 \
+     --push
+   ```
+
+For dependency-only fixes later (for example missing Python packages in custom nodes), repeat only step 2.
+This keeps rebuild time and risk much lower.
+
 ### Setup for Windows (using WSL2)
 
 Running Docker with GPU acceleration on Windows typically requires WSL2 (Windows Subsystem for Linux).
