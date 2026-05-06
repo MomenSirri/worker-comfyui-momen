@@ -6,8 +6,16 @@ variable "DOCKERHUB_IMG" {
   default = "worker-comfyui"
 }
 
+variable "FLUX2_KLEIN_IMG" {
+  default = "flux2-klein9b"
+}
+
 variable "RELEASE_VERSION" {
   default = "latest"
+}
+
+variable "FLUX2_KLEIN_TAG" {
+  default = "v03"
 }
 
 variable "COMFYUI_VERSION" {
@@ -189,7 +197,7 @@ target "base-cuda12-8-1" {
 target "flux2-klein" {
   context = "."
   dockerfile = "Dockerfile"
-  target = "final"
+  target = "final-flux2-klein"
   args = {
     BASE_IMAGE = "${BASE_IMAGE}"
     COMFYUI_VERSION = "${COMFYUI_VERSION}"
@@ -199,7 +207,7 @@ target "flux2-klein" {
     MODEL_TYPE = "flux2-klein"
     HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
   }
-  tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-flux2-klein"]
+  tags = ["${DOCKERHUB_REPO}/${FLUX2_KLEIN_IMG}:${FLUX2_KLEIN_TAG}-cuda12.6"]
   inherits = ["base"]
 }
 
@@ -224,7 +232,7 @@ target "flux2-klein-cuda12-8-1" {
     LLAMA_CPP_PYTHON_PYTAG = "cp312"
   }
 
-  tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-flux2-klein-cuda12.8.1"]
+  tags = ["${DOCKERHUB_REPO}/${FLUX2_KLEIN_IMG}:${FLUX2_KLEIN_TAG}"]
   inherits = ["base"]
 }
 

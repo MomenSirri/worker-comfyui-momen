@@ -1,0 +1,75 @@
+# --------------------------------------------------
+# Environment setup
+# --------------------------------------------------
+# 1) Copy .env.example -> .env
+# 2) Fill your keys in .env
+#
+# PowerShell (current terminal only):
+#   Get-Content .env | ForEach-Object {
+#     if ($_ -match '^\s*#' -or $_ -match '^\s*$') { return }
+#     $k, $v = $_ -split '=', 2
+#     [Environment]::SetEnvironmentVariable($k.Trim(), $v.Trim(), 'Process')
+#   }
+#
+# Bash/Zsh:
+#   set -a && source .env && set +a
+
+# --------------------------------------------------
+# Docker build examples (no hardcoded secrets)
+# --------------------------------------------------
+
+# seedvr
+docker build --target final-seedvr -t momensirribrick/seedvr:v01 \
+  --build-arg BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04 \
+  --build-arg COMFYUI_VERSION=latest \
+  --build-arg CUDA_VERSION_FOR_COMFY= \
+  --build-arg ENABLE_PYTORCH_UPGRADE=true \
+  --build-arg PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 \
+  --build-arg MODEL_TYPE=seedvr \
+  --build-arg HUGGINGFACE_ACCESS_TOKEN \
+  .
+
+# flux2-klein
+docker build --target final-flux2-klein -t momensirribrick/flux2-klein9b:v03 \
+  --build-arg BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04 \
+  --build-arg COMFYUI_VERSION=latest \
+  --build-arg CUDA_VERSION_FOR_COMFY= \
+  --build-arg ENABLE_PYTORCH_UPGRADE=true \
+  --build-arg PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 \
+  --build-arg MODEL_TYPE=flux2-klein \
+  --build-arg HUGGINGFACE_ACCESS_TOKEN \
+  .
+
+# flux2-klein via bake
+docker buildx bake -f docker-bake.hcl flux2-klein-cuda12-8-1 --push
+
+# general-enhancement (includes Civitai token + optional checksum verification)
+docker build --target final-enhance -t momensirribrick/general-enhancement:v02 \
+  --build-arg BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04 \
+  --build-arg COMFYUI_VERSION=latest \
+  --build-arg CUDA_VERSION_FOR_COMFY= \
+  --build-arg ENABLE_PYTORCH_UPGRADE=true \
+  --build-arg PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 \
+  --build-arg MODEL_TYPE=enhance \
+  --build-arg HUGGINGFACE_ACCESS_TOKEN \
+  --build-arg CIVITAI_API_TOKEN \
+  --build-arg KREAMANIA_FP8_SHA256 \
+  .
+
+# --------------------------------------------------
+# Faster rebuild flow for general-enhancement
+# --------------------------------------------------
+# 1) Build/push heavy core once
+docker buildx bake -f docker-bake.hcl enhance-core --push
+
+# 2) Build/push thin final image (defaults to local stage alias)
+docker buildx bake -f docker-bake.hcl enhance --push
+
+# 3) On a fresh machine (or after Docker reinstall), skip heavy rebuild:
+#    reuse pushed core image and rebuild only thin final-enhance overlay.
+docker buildx bake -f docker-bake.hcl enhance \
+  --set enhance.args.ENHANCE_CORE_IMAGE=momensirribrick/general-enhancement:core-v01 \
+  --push
+
+# local compose run
+docker-compose up --build

@@ -1,6 +1,6 @@
 services:
   comfyui-worker:
-    image: momensirribrick/general-enhancement:v04
+    image: momensirribrick/flux2-klein9b:v03
     pull_policy: never
     env_file:
       - .env

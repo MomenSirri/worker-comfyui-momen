@@ -254,24 +254,33 @@ RUN if [ "$MODEL_TYPE" = "seedvr" ]; then \
 fi
 
 
-RUN if [ "$MODEL_TYPE" = "flux2-klein" ]; then \
-  wget -q -O models/depthanything/depth_anything_v2_vitl_fp16.safetensors \
-    "https://huggingface.co/Kijai/DepthAnythingV2-safetensors/resolve/main/depth_anything_v2_vitl_fp16.safetensors?download=true" && \
-  wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/diffusion_models/flux-2-klein-9b-fp8.safetensors \
-    "https://huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8/resolve/main/flux-2-klein-9b-fp8.safetensors" && \
-  wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/diffusion_models/flux-2-klein-base-9b-fp8.safetensors \
-    "https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors" && \
-  wget -q -O models/text_encoders/qwen_3_8b_fp8mixed.safetensors \
-    "https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors?download=true" && \
-  wget -q -O models/vae/flux2-vae.safetensors \
-    "https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/vae/flux2-vae.safetensors?download=true" && \
-  wget -q -O models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/Qwen3VL-4B-Instruct-Q8_0.gguf \
-    "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-Q8_0.gguf"; \
-  wget -q -O models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-F16.gguf \
-    "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-F16.gguf"; \
-  wget -q -O models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf \
-    "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf"; \
-fi
+RUN set -eux; \
+  if [ "$MODEL_TYPE" = "flux2-klein" ]; then \
+    wget -q -O models/depthanything/depth_anything_v2_vitl_fp16.safetensors \
+      "https://huggingface.co/Kijai/DepthAnythingV2-safetensors/resolve/main/depth_anything_v2_vitl_fp16.safetensors?download=true"; \
+    wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/diffusion_models/flux-2-klein-9b-fp8.safetensors \
+      "https://huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8/resolve/main/flux-2-klein-9b-fp8.safetensors"; \
+    wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/diffusion_models/flux-2-klein-base-9b-fp8.safetensors \
+      "https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors"; \
+    wget -q -O models/text_encoders/qwen_3_8b_fp8mixed.safetensors \
+      "https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors?download=true"; \
+    wget -q -O models/vae/flux2-vae.safetensors \
+      "https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/vae/flux2-vae.safetensors?download=true"; \
+    wget -q -O models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/Qwen3VL-4B-Instruct-Q8_0.gguf \
+      "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-Q8_0.gguf"; \
+    wget -q -O models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-F16.gguf \
+      "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-F16.gguf"; \
+    wget -q -O models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf \
+      "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf"; \
+    test -s models/depthanything/depth_anything_v2_vitl_fp16.safetensors; \
+    test -s models/diffusion_models/flux-2-klein-9b-fp8.safetensors; \
+    test -s models/diffusion_models/flux-2-klein-base-9b-fp8.safetensors; \
+    test -s models/text_encoders/qwen_3_8b_fp8mixed.safetensors; \
+    test -s models/vae/flux2-vae.safetensors; \
+    test -s models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/Qwen3VL-4B-Instruct-Q8_0.gguf; \
+    test -s models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-F16.gguf; \
+    test -s models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf; \
+  fi
 
 
 # Stage 3: Final image
@@ -294,6 +303,10 @@ COPY ./models/loras/lenovo_flux_klein9b.safetensors /comfyui/models/loras/
 COPY ./models/loras/reccam_Klein_v01.safetensors /comfyui/models/loras/
 COPY ./models/loras/Klein-consistency.safetensors /comfyui/models/loras/
 COPY ./models/loras/realistic.safetensors /comfyui/models/loras/
+COPY ./models/loras/FLUX.2-klein-base-9B_LoRa_by-AI_Characters_STYLE_SmartphoneSnapshotPhotoReality_v13.safetensors /comfyui/models/loras/
+COPY ./models/loras/Klein_9B_bvfinish_v01.safetensors /comfyui/models/loras/
+COPY ./models/loras/klein_archenhanced_refine_v11.safetensors /comfyui/models/loras/
+
 
 # Need curl for GitHub API (base image installs wget but not curl)
 RUN apt-get update \
