@@ -15,7 +15,7 @@ variable "RELEASE_VERSION" {
 }
 
 variable "FLUX2_KLEIN_TAG" {
-  default = "v03"
+  default = "v04"
 }
 
 variable "COMFYUI_VERSION" {
@@ -59,7 +59,7 @@ variable "ENHANCE_CORE_IMAGE" {
 }
 
 group "default" {
-  targets = ["base", "sdxl", "sd3", "flux1-schnell", "flux1-dev", "flux1-dev-fp8", "z-image-turbo", "flux2-klein", "base-cuda12-8-1", "flux2-klein-cuda12-8-1", "seedvr", "seedvr-cuda12-8-1", "enhance-core", "enhance"]
+  targets = ["base", "sdxl", "sd3", "flux1-schnell", "flux1-dev", "flux1-dev-fp8", "z-image-turbo", "flux2-klein", "refrence_gen_sdxl_flux2_klein", "base-cuda12-8-1", "flux2-klein-cuda12-8-1", "refrence_gen_sdxl_flux2_klein-cuda12-8-1", "seedvr", "seedvr-cuda12-8-1", "enhance-core", "enhance"]
 }
 
 target "base" {
@@ -233,6 +233,49 @@ target "flux2-klein-cuda12-8-1" {
   }
 
   tags = ["${DOCKERHUB_REPO}/${FLUX2_KLEIN_IMG}:${FLUX2_KLEIN_TAG}"]
+  inherits = ["base"]
+}
+
+target "refrence_gen_sdxl_flux2_klein" {
+  context = "."
+  dockerfile = "Dockerfile"
+  target = "final-refrence_gen_sdxl_flux2_klein"
+  args = {
+    BASE_IMAGE = "${BASE_IMAGE}"
+    COMFYUI_VERSION = "${COMFYUI_VERSION}"
+    CUDA_VERSION_FOR_COMFY = "${CUDA_VERSION_FOR_COMFY}"
+    ENABLE_PYTORCH_UPGRADE = "${ENABLE_PYTORCH_UPGRADE}"
+    PYTORCH_INDEX_URL = "${PYTORCH_INDEX_URL}"
+    MODEL_TYPE = "refrence_gen_sdxl_flux2_klein"
+    HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
+
+    LLAMA_CPP_PYTHON_REPO = "JamePeng/llama-cpp-python"
+    LLAMA_CPP_PYTHON_TAG  = "v0.3.30-cu128-Basic-linux-20260302"
+    LLAMA_CPP_PYTHON_PYTAG = "cp312"
+  }
+  tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-refrence_gen_sdxl_flux2_klein"]
+  inherits = ["base"]
+}
+
+target "refrence_gen_sdxl_flux2_klein-cuda12-8-1" {
+  context = "."
+  dockerfile = "Dockerfile"
+  target = "final-refrence_gen_sdxl_flux2_klein"
+  platforms = ["linux/amd64"]
+  args = {
+    BASE_IMAGE = "nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04"
+    COMFYUI_VERSION = "${COMFYUI_VERSION}"
+    CUDA_VERSION_FOR_COMFY = ""
+    ENABLE_PYTORCH_UPGRADE = "true"
+    PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
+    MODEL_TYPE = "refrence_gen_sdxl_flux2_klein"
+    HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
+
+    LLAMA_CPP_PYTHON_REPO = "JamePeng/llama-cpp-python"
+    LLAMA_CPP_PYTHON_TAG  = "v0.3.30-cu128-Basic-linux-20260302"
+    LLAMA_CPP_PYTHON_PYTAG = "cp312"
+  }
+  tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-refrence_gen_sdxl_flux2_klein-cuda12.8.1"]
   inherits = ["base"]
 }
 

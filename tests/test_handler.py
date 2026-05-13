@@ -14,6 +14,18 @@ RUNPOD_WORKER_COMFY_TEST_RESOURCES_IMAGES = "./test_resources/images"
 
 
 class TestRunpodWorkerComfy(unittest.TestCase):
+    def test_finalize_job_result_success_with_images(self):
+        result = handler._finalize_job_result(["img1", "img2"])
+        self.assertEqual(result, {"status": "success", "message": ["img1", "img2"]})
+
+    def test_finalize_job_result_fails_when_no_images(self):
+        result = handler._finalize_job_result([], warnings=["Node 55 produced unhandled output keys: ['text']."])
+        self.assertIn("error", result)
+        self.assertEqual(result["error"], "Workflow produced no images.")
+        self.assertIn("details", result)
+        self.assertTrue(any("unhandled output keys" in item for item in result["details"]))
+        self.assertTrue(result.get("refresh_worker"))
+
     def test_valid_input_with_workflow_only(self):
         input_data = {"workflow": {"key": "value"}}
         validated_data, error = handler.validate_input(input_data)

@@ -115,10 +115,14 @@ RUN mkdir -p \
     /comfyui/models/vae \
     /comfyui/models/unet \
     /comfyui/models/clip \
+    /comfyui/models/clip_vision \
     /comfyui/models/text_encoders \
     /comfyui/models/diffusion_models \
     /comfyui/models/model_patches \
+    /comfyui/models/controlnet \
     /comfyui/models/depthanything \
+    /comfyui/models/ipadapter \
+    /comfyui/models/loras \
     /comfyui/models/SEEDVR2 \
     /comfyui/models/upscale_models \
     /comfyui/models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF \
@@ -282,6 +286,62 @@ RUN set -eux; \
     test -s models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf; \
   fi
 
+RUN set -eux; \
+  if [ "$MODEL_TYPE" = "refrence_gen_sdxl_flux2_klein" ]; then \
+    mkdir -p \
+      models/checkpoints \
+      models/depthanything \
+      models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF \
+      models/ipadapter \
+      models/clip_vision \
+      models/diffusion_models \
+      models/text_encoders \
+      models/vae \
+      models/controlnet/controlnet-union-sdxl-1.0; \
+    wget -q -O models/checkpoints/dreamshaperXL_v21TurboDPMSDE.safetensors \
+      "https://huggingface.co/gingerlollipopdx/ModelsXL/resolve/main/dreamshaperXL_v21TurboDPMSDE.safetensors"; \
+    wget -q -O models/depthanything/depth_anything_v2_vitl_fp16.safetensors \
+      "https://huggingface.co/Kijai/DepthAnythingV2-safetensors/resolve/main/depth_anything_v2_vitl_fp16.safetensors?download=true"; \
+    wget -q -O models/ipadapter/ip-adapter-plus_sdxl_vit-h.safetensors \
+      "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors"; \
+    wget -q -O models/ipadapter/ip_plus_composition_sdxl.safetensors \
+      "https://huggingface.co/ostris/ip-composition-adapter/resolve/main/ip_plus_composition_sdxl.safetensors"; \
+    wget -q -O models/ipadapter/ip-adapter_sdxl_vit-h.safetensors \
+      "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl_vit-h.safetensors"; \
+    wget -q -O models/ipadapter/ip-adapter_sdxl.safetensors \
+      "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl.safetensors"; \
+    wget -q -O models/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors \
+      "https://huggingface.co/Kuvshin/models-moved/resolve/main/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"; \
+    wget -q --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" -O models/diffusion_models/flux-2-klein-9b-fp8.safetensors \
+      "https://huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8/resolve/main/flux-2-klein-9b-fp8.safetensors"; \
+    wget -q -O models/text_encoders/qwen_3_8b_fp8mixed.safetensors \
+      "https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors?download=true"; \
+    wget -q -O models/vae/flux2-vae.safetensors \
+      "https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/vae/flux2-vae.safetensors?download=true"; \
+    wget -q -O models/controlnet/controlnet-union-sdxl-1.0/diffusion_pytorch_model_promax.safetensors \
+      "https://huggingface.co/xinsir/controlnet-union-sdxl-1.0/resolve/main/diffusion_pytorch_model_promax.safetensors"; \
+    wget -q -O models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/Qwen3VL-4B-Instruct-Q8_0.gguf \
+      "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-Q8_0.gguf"; \
+    wget -q -O models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-F16.gguf \
+      "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-F16.gguf"; \
+    wget -q -O models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf \
+      "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf"; \
+    test -s models/checkpoints/dreamshaperXL_v21TurboDPMSDE.safetensors; \
+    test -s models/depthanything/depth_anything_v2_vitl_fp16.safetensors; \
+    test -s models/ipadapter/ip-adapter-plus_sdxl_vit-h.safetensors; \
+    test -s models/ipadapter/ip_plus_composition_sdxl.safetensors; \
+    test -s models/ipadapter/ip-adapter_sdxl_vit-h.safetensors; \
+    test -s models/ipadapter/ip-adapter_sdxl.safetensors; \
+    test -s models/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors; \
+    test -s models/diffusion_models/flux-2-klein-9b-fp8.safetensors; \
+    test -s models/text_encoders/qwen_3_8b_fp8mixed.safetensors; \
+    test -s models/vae/flux2-vae.safetensors; \
+    test -s models/controlnet/controlnet-union-sdxl-1.0/diffusion_pytorch_model_promax.safetensors; \
+    test -s models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/Qwen3VL-4B-Instruct-Q8_0.gguf; \
+    test -s models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-F16.gguf; \
+    test -s models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf; \
+  fi
+
 
 # Stage 3: Final image
 FROM base AS final
@@ -428,6 +488,233 @@ COPY --from=runtime-files /start.sh /network_volume.py /handler.py /test_input.j
 RUN chmod +x /start.sh
 CMD ["/start.sh"]
 
+
+
+# --- NEW: refrence_gen_sdxl_flux2_klein image variant ---
+FROM final AS final-refrence_gen_sdxl_flux2_klein
+
+# Make sure the folder exists
+RUN mkdir -p /comfyui/models/loras
+
+# Copy LoRAs from build context into the image
+COPY ./models/loras/klein_archenhanced_refine_v11.safetensors /comfyui/models/loras/
+COPY ./models/loras/Klein_9B_bvfinish_v01.safetensors /comfyui/models/loras/
+
+# Need curl for GitHub API (base image installs wget but not curl)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates pkg-config libcairo2-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# Custom Scripts
+ARG CUSTOM_SCRIPTS_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/ComfyUI-Custom-Scripts \
+ && git clone https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git /comfyui/custom_nodes/ComfyUI-Custom-Scripts \
+ && cd /comfyui/custom_nodes/ComfyUI-Custom-Scripts \
+ && if [ "${CUSTOM_SCRIPTS_COMMIT}" != "main" ]; then git checkout ${CUSTOM_SCRIPTS_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
+# DepthAnythingV2
+ARG DEPTHANYTHINGV2_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/ComfyUI-DepthAnythingV2 \
+ && git clone https://github.com/kijai/ComfyUI-DepthAnythingV2.git /comfyui/custom_nodes/ComfyUI-DepthAnythingV2 \
+ && cd /comfyui/custom_nodes/ComfyUI-DepthAnythingV2 \
+ && if [ "${DEPTHANYTHINGV2_COMMIT}" != "main" ]; then git checkout ${DEPTHANYTHINGV2_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
+# ControlNet Aux
+ARG CONTROLNET_AUX_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/comfyui-controlnet-aux \
+ && git clone https://github.com/comfyorg/comfyui-controlnet-aux.git /comfyui/custom_nodes/comfyui-controlnet-aux \
+ && cd /comfyui/custom_nodes/comfyui-controlnet-aux \
+ && if [ "${CONTROLNET_AUX_COMMIT}" != "main" ]; then git checkout ${CONTROLNET_AUX_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
+# LayerStyle
+ARG LAYERSTYLE_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/ComfyUI_LayerStyle \
+ && git clone https://github.com/chflame163/ComfyUI_LayerStyle.git /comfyui/custom_nodes/ComfyUI_LayerStyle \
+ && cd /comfyui/custom_nodes/ComfyUI_LayerStyle \
+ && if [ "${LAYERSTYLE_COMMIT}" != "main" ]; then git checkout ${LAYERSTYLE_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
+# rgthree
+ARG RGTHREE_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/rgthree-comfy \
+ && git clone https://github.com/rgthree/rgthree-comfy.git /comfyui/custom_nodes/rgthree-comfy \
+ && cd /comfyui/custom_nodes/rgthree-comfy \
+ && if [ "${RGTHREE_COMMIT}" != "main" ]; then git checkout ${RGTHREE_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
+# Essentials pinned
+ARG ESSENTIALS_COMMIT=9d9f4bedfc9f0321c19faf71855e228c93bd0dc9
+RUN rm -rf /comfyui/custom_nodes/ComfyUI_essentials \
+ && mkdir -p /comfyui/custom_nodes/ComfyUI_essentials \
+ && git init /comfyui/custom_nodes/ComfyUI_essentials \
+ && cd /comfyui/custom_nodes/ComfyUI_essentials \
+ && git remote add origin https://github.com/cubiq/ComfyUI_essentials.git \
+ && git fetch --depth 1 origin ${ESSENTIALS_COMMIT} \
+ && git checkout FETCH_HEAD \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
+# KJNodes (from snapshot)
+ARG KJNODES_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/ComfyUI-KJNodes \
+ && git clone https://github.com/kijai/ComfyUI-KJNodes.git /comfyui/custom_nodes/ComfyUI-KJNodes \
+ && cd /comfyui/custom_nodes/ComfyUI-KJNodes \
+ && if [ "${KJNODES_COMMIT}" != "main" ]; then git checkout ${KJNODES_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
+# QwenVL
+ARG QWENVL_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/ComfyUI-QwenVL \
+ && git clone https://github.com/1038lab/ComfyUI-QwenVL /comfyui/custom_nodes/ComfyUI-QwenVL \
+ && cd /comfyui/custom_nodes/ComfyUI-QwenVL \
+ && if [ "${QWENVL_COMMIT}" != "main" ]; then git checkout ${QWENVL_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
+# Easy Use
+ARG EASY_USE_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/ComfyUI-Easy-Use \
+ && git clone https://github.com/yolain/ComfyUI-Easy-Use.git /comfyui/custom_nodes/ComfyUI-Easy-Use \
+ && cd /comfyui/custom_nodes/ComfyUI-Easy-Use \
+ && if [ "${EASY_USE_COMMIT}" != "main" ]; then git checkout ${EASY_USE_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
+# Tooling nodes
+ARG TOOLING_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/comfyui-tooling-nodes \
+ && git clone https://github.com/Acly/comfyui-tooling-nodes.git /comfyui/custom_nodes/comfyui-tooling-nodes \
+ && cd /comfyui/custom_nodes/comfyui-tooling-nodes \
+ && if [ "${TOOLING_COMMIT}" != "main" ]; then git checkout ${TOOLING_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
+# IPAdapter Plus
+ARG IPADAPTER_PLUS_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/ComfyUI_IPAdapter_plus \
+ && git clone https://github.com/cubiq/ComfyUI_IPAdapter_plus.git /comfyui/custom_nodes/ComfyUI_IPAdapter_plus \
+ && cd /comfyui/custom_nodes/ComfyUI_IPAdapter_plus \
+ && if [ "${IPADAPTER_PLUS_COMMIT}" != "main" ]; then git checkout ${IPADAPTER_PLUS_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
+# TinyTerra nodes
+ARG TINYTERRA_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/ComfyUI_tinyterraNodes \
+ && git clone https://github.com/TinyTerra/ComfyUI_tinyterraNodes.git /comfyui/custom_nodes/ComfyUI_tinyterraNodes \
+ && cd /comfyui/custom_nodes/ComfyUI_tinyterraNodes \
+ && if [ "${TINYTERRA_COMMIT}" != "main" ]; then git checkout ${TINYTERRA_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
+# SDXL prompt styler
+ARG SDXL_PROMPT_STYLER_COMMIT=main
+RUN rm -rf /comfyui/custom_nodes/sdxl_prompt_styler \
+ && git clone https://github.com/twri/sdxl_prompt_styler.git /comfyui/custom_nodes/sdxl_prompt_styler \
+ && cd /comfyui/custom_nodes/sdxl_prompt_styler \
+ && if [ "${SDXL_PROMPT_STYLER_COMMIT}" != "main" ]; then git checkout ${SDXL_PROMPT_STYLER_COMMIT}; fi \
+ && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
+# ---------- llama-cpp-python (Vision / Qwen-VL GGUF) ----------
+SHELL ["/bin/bash", "-lc"]
+
+# Defaults (override via build args in docker-bake.hcl)
+ARG LLAMA_CPP_PYTHON_REPO=JamePeng/llama-cpp-python
+ARG LLAMA_CPP_PYTHON_TAG=v0.3.30-cu128-Basic-linux-20260302
+ARG LLAMA_CPP_PYTHON_PYTAG=cp312
+
+ENV LLAMA_CPP_PYTHON_REPO="${LLAMA_CPP_PYTHON_REPO}" \
+    LLAMA_CPP_PYTHON_TAG="${LLAMA_CPP_PYTHON_TAG}" \
+    LLAMA_CPP_PYTHON_PYTAG="${LLAMA_CPP_PYTHON_PYTAG}"
+
+RUN cat > /tmp/install_llama_vision.sh <<'SH'
+set -eux
+mkdir -p /opt/wheels
+
+API="https://api.github.com/repos/${LLAMA_CPP_PYTHON_REPO}/releases/tags/${LLAMA_CPP_PYTHON_TAG}"
+curl -sL "$API" -o /tmp/llama_release.json
+
+# --- pick wheel name + url from release assets ---
+WHEEL_LINE="$(python - <<'PY'
+import json, os, sys
+data = json.load(open('/tmp/llama_release.json', 'r', encoding='utf-8'))
+assets = data.get('assets', [])
+pytag = os.environ.get('LLAMA_CPP_PYTHON_PYTAG', 'cp312')
+
+cand = []
+for a in assets:
+    name = a.get('name','')
+    url  = a.get('browser_download_url','')
+    if not name.endswith('.whl'):
+        continue
+    if pytag not in name:
+        continue
+    if not (('linux_x86_64' in name) or ('manylinux' in name)):
+        continue
+    # prefer CUDA wheels if multiple match
+    cand.append((('cu' in name), len(name), name, url))
+
+if not cand:
+    print("No matching wheel found.", file=sys.stderr)
+    print("Assets:", [a.get('name') for a in assets], file=sys.stderr)
+    sys.exit(1)
+
+cand.sort(reverse=True)
+name, url = cand[0][2], cand[0][3]
+print(name + "\t" + url)
+PY
+)"
+
+WHEEL_NAME="$(printf '%s' "$WHEEL_LINE" | cut -f1)"
+WHEEL_URL="$(printf '%s' "$WHEEL_LINE" | cut -f2-)"
+WHEEL_PATH="/opt/wheels/$WHEEL_NAME"
+
+echo "Wheel path: $WHEEL_PATH"
+if [ ! -f "$WHEEL_PATH" ]; then
+  echo "Downloading: $WHEEL_NAME"
+  curl -L "$WHEEL_URL" -o "$WHEEL_PATH"
+else
+  echo "Using cached wheel: $WHEEL_NAME"
+fi
+
+# venv is already active via PATH=/opt/venv/bin:$PATH
+/opt/venv/bin/python -m pip install --no-cache-dir --force-reinstall "$WHEEL_PATH"
+
+# verify handlers exist WITHOUT importing llama_cpp, to avoid CUDA load at build time
+python - <<'PY'
+import site, pathlib
+target = None
+for sp in site.getsitepackages():
+    cand = pathlib.Path(sp) / "llama_cpp" / "llama_chat_format.py"
+    if cand.exists():
+        target = cand
+        break
+
+if not target:
+    raise SystemExit("Could not find llama_cpp/llama_chat_format.py in site-packages")
+
+txt = target.read_text(encoding="utf-8", errors="ignore")
+needed = ["Qwen3VLChatHandler", "Qwen25VLChatHandler"]
+missing = [n for n in needed if n not in txt]
+if missing:
+    raise SystemExit(f"Missing handlers in {target}: {missing}")
+
+print(f"OK: found {needed} in {target} (no CUDA import during build)")
+PY
+
+rm -f /tmp/llama_release.json
+SH
+
+RUN --mount=type=cache,target=/opt/wheels \
+    tr -d '\r' < /tmp/install_llama_vision.sh > /tmp/install_llama_vision.lf \
+ && mv /tmp/install_llama_vision.lf /tmp/install_llama_vision.sh \
+ && bash /tmp/install_llama_vision.sh \
+ && rm -f /tmp/install_llama_vision.sh
+
+# Ensure ComfyUI core Python deps (e.g. alembic/comfy_aimdo) match the bundled ComfyUI version.
+RUN /opt/venv/bin/python -m pip install --no-cache-dir -r /comfyui/requirements.txt
+
+# Add runtime worker entrypoint files as the last layer for fast handler-only rebuilds
+COPY --from=runtime-files /start.sh /network_volume.py /handler.py /test_input.json /
+RUN chmod +x /start.sh
+CMD ["/start.sh"]
 
 
  # --- NEW: seedvr image variant ---

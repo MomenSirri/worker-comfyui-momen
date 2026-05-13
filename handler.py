@@ -126,6 +126,31 @@ def _failure_result(error_message, details=None):
         )
     return result
 
+
+def _finalize_job_result(output_messages, errors=None, warnings=None):
+    """
+    Build the terminal handler response.
+
+    Workflows for this worker are expected to produce at least one image. Returning
+    a "successful" response with zero images leaves clients with an ambiguous state,
+    so no-image completions are treated as failures with details.
+    """
+    output_messages = output_messages or []
+    errors = errors or []
+    warnings = warnings or []
+
+    if output_messages:
+        return {"status": "success", "message": output_messages}
+
+    details = [str(item) for item in [*errors, *warnings] if str(item).strip()]
+    if not details:
+        details = ["Workflow completed without producing any images."]
+
+    return _failure_result(
+        "Workflow produced no images.",
+        details=details,
+    )
+
 # ---------------------------------------------------------------------------
 # Helper: quick reachability probe of ComfyUI HTTP endpoint (port 8188)
 # ---------------------------------------------------------------------------
@@ -1243,6 +1268,7 @@ def handler(job):
     prompt_id = None
     output_messages = []
     errors = []
+    warnings = []
     progress_state = {
         "last_message": None,
         "last_sent_at": 0.0,
@@ -1816,7 +1842,7 @@ def handler(job):
             warning_msg = f"No outputs found in history for prompt {prompt_id}."
             print(f"worker-comfyui - {warning_msg}")
             if not errors:
-                errors.append(warning_msg)
+                warnings.append(warning_msg)
 
         print(f"worker-comfyui - Processing {len(outputs)} output nodes...")
         _safe_progress_update(
@@ -1919,6 +1945,7 @@ def handler(job):
                 print(
                     f"worker-comfyui - --> If this output is useful, please consider opening an issue on GitHub to discuss adding support."
                 )
+                warnings.append(warn_msg)
 
     except websocket.WebSocketException as e:
         print(f"worker-comfyui - WebSocket Error: {e}")
@@ -1947,23 +1974,24 @@ def handler(job):
 
     if errors:
         print(f"worker-comfyui - Job completed with errors/warnings: {errors}")
+    if warnings:
+        print(f"worker-comfyui - Job completed with warnings: {warnings}")
 
-    if not output_messages and errors:
+    final_result = _finalize_job_result(output_messages, errors=errors, warnings=warnings)
+    if "error" in final_result:
         print(f"worker-comfyui - Job failed with no output images.")
-        _safe_progress_update(job, "Job failed while collecting outputs.", progress_state, force=True)
-        return _failure_result("Job processing failed", details=errors)
-    elif not output_messages and not errors:
-        print(
-            f"worker-comfyui - Job completed successfully, but the workflow produced no images."
+        _safe_progress_update(
+            job,
+            "Job failed: workflow produced no images.",
+            progress_state,
+            force=True,
         )
-        final_result = {"status": "success", "message": []}
-        print(f"worker-comfyui - Job completed. Returning 0 image(s).")
         return final_result
 
     # Avoid sending progress updates after output is finalized.
     # RunPod may process late progress events out-of-order and keep request state IN_PROGRESS.
     print(f"worker-comfyui - Job completed. Returning {len(output_messages)} image(s).")
-    return {"status": "success", "message": output_messages}
+    return final_result
 
 
 if __name__ == "__main__":
