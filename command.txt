@@ -44,7 +44,7 @@ docker build --target final-flux2-klein -t momensirribrick/flux2-klein9b:v04 \
 docker buildx bake -f docker-bake.hcl flux2-klein-cuda12-8-1 --push
 
 # general-enhancement (includes Civitai token + optional checksum verification)
-docker build --target final-enhance -t momensirribrick/general-enhancement:v02 \
+docker build --target final-enhance -t momensirribrick/general-enhancement:v05 \
   --build-arg BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04 \
   --build-arg COMFYUI_VERSION=latest \
   --build-arg CUDA_VERSION_FOR_COMFY= \

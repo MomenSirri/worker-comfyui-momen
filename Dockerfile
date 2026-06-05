@@ -1,5 +1,5 @@
 # Build argument for base image selection
-ARG BASE_IMAGE=nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
+ARG BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
 ARG ENHANCE_CORE_IMAGE=final-enhance-core
 
 # Stage 1: Base image with common dependencies
@@ -985,6 +985,34 @@ RUN /opt/venv/bin/python -m pip install --no-cache-dir \
     ultralytics \
     segment-anything \
     dill
+
+# Thin-layer enhance-specific model additions.
+# Keep this in final-enhance so new workflow weights can be shipped without rebuilding the heavy core.
+ARG FLUXMANIA_SVDQ_INT4_URL=https://huggingface.co/spooknik/Fluxmania-SVDQ/resolve/main/svdq-int4_r32-fluxmania-legacy.safetensors
+RUN mkdir -p /comfyui/models/diffusion_models \
+ && wget -nv -O /comfyui/models/diffusion_models/svdq-int4_r32-fluxmania-legacy.safetensors ${FLUXMANIA_SVDQ_INT4_URL} \
+ && test -s /comfyui/models/diffusion_models/svdq-int4_r32-fluxmania-legacy.safetensors
+
+# Thin-layer custom node install: momi_gpu_model_selector
+# Keep this in final-enhance so local node changes stay fast to rebuild.
+COPY ./custom_nodes/momi_gpu_model_selector /comfyui/custom_nodes/momi_gpu_model_selector
+RUN set -eux; \
+    if [ -f /comfyui/custom_nodes/momi_gpu_model_selector/requirements.txt ]; then \
+      /opt/venv/bin/python -m pip install --no-cache-dir -r /comfyui/custom_nodes/momi_gpu_model_selector/requirements.txt; \
+    fi; \
+    /opt/venv/bin/python - <<'PY'
+import importlib.util
+from pathlib import Path
+
+module_path = Path("/comfyui/custom_nodes/momi_gpu_model_selector/__init__.py")
+spec = importlib.util.spec_from_file_location("momi_gpu_model_selector", module_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+assert "MomiNunchakuFluxGPUModelSelector" in module.NODE_CLASS_MAPPINGS
+assert module.NODE_DISPLAY_NAME_MAPPINGS["MomiNunchakuFluxGPUModelSelector"] == "Nunchaku Flux GPU Model Selector"
+print("momi_gpu_model_selector OK")
+PY
 
 # Thin-layer custom node install: ComfyUI-Inpaint-CropAndStitch
 # Keep this in final-enhance so we can add/fix nodes without rebuilding heavy core layers.

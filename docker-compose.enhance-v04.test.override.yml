@@ -1,0 +1,6 @@
+services:
+  comfyui-worker:
+    image: momensirribrick/general-enhancement:v05
+    ports:
+      - "8001:8000"
+      - "8189:8188"
