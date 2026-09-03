@@ -5,3 +5,12 @@ data
 models
 simulated_uploaded
 __pycache__
+
+# Large build artifacts. Tools that enumerate untracked files (e.g. the
+# Codex desktop app) run git over them; models.zip is ~36 GB, which grew
+# those git subprocesses to 8-16 GB of RAM and starved other services on
+# the build host. models/ is already ignored above; these cover the large
+# artifacts that live outside it.
+models.zip
+*.safetensors
+*.gguf
