@@ -23,7 +23,10 @@ ENV PYTHONUNBUFFERED=1
 # Speed up some cmake builds
 ENV CMAKE_BUILD_PARALLEL_LEVEL=8
 
-# Install Python, git and other necessary tools
+# Install Python, git and other necessary tools.
+# Recommended packages are kept on purpose: python3-pip pulls in build-essential
+# and python3-dev, which custom-node requirements without wheels (e.g. insightface)
+# need to compile. The cleanup runs in the same layer so it actually shrinks it.
 RUN apt-get update && apt-get install -y \
     python3.12 \
     python3.12-venv \
@@ -37,10 +40,8 @@ RUN apt-get update && apt-get install -y \
     libxrender1 \
     ffmpeg \
     && ln -sf /usr/bin/python3.12 /usr/bin/python \
-    && ln -sf /usr/bin/pip3 /usr/bin/pip
-
-# Clean up to reduce image size
-RUN apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
+    && ln -sf /usr/bin/pip3 /usr/bin/pip \
+    && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
 # Install uv (latest) using official installer and create isolated venv
 RUN wget -qO- https://astral.sh/uv/install.sh | sh \
@@ -48,31 +49,48 @@ RUN wget -qO- https://astral.sh/uv/install.sh | sh \
     && ln -s /root/.local/bin/uvx /usr/local/bin/uvx \
     && uv venv /opt/venv
 
-# Use the virtual environment for all subsequent commands
+# Use the virtual environment for all subsequent commands.
+# VIRTUAL_ENV must be set, not only PATH: without it comfy-cli treats /opt/venv as
+# an isolated tool environment, creates a second venv at /comfyui/.venv and installs
+# PyTorch, ComfyUI's requirements and every registry custom node's requirements
+# there, while the entrypoint runs /opt/venv/bin/python.
+ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
+# Keep pip/uv download caches out of the image layers
+ENV PIP_NO_CACHE_DIR=1 \
+    UV_NO_CACHE=1
 
 # Install comfy-cli + dependencies needed by it to install ComfyUI
 RUN uv pip install comfy-cli pip setuptools wheel
 
-# Install ComfyUI
-RUN if [ -n "${CUDA_VERSION_FOR_COMFY}" ]; then \
-      /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --cuda-version "${CUDA_VERSION_FOR_COMFY}" --nvidia; \
-    else \
-      /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --nvidia; \
-    fi
-
-# Upgrade PyTorch if needed (for newer CUDA versions)
+# Install the requested PyTorch build first (for newer CUDA versions). comfy-cli is
+# then told to skip its own PyTorch install, so the image does not carry a second,
+# replaced PyTorch/CUDA stack in an earlier layer.
 RUN if [ "$ENABLE_PYTORCH_UPGRADE" = "true" ]; then \
       if [ -n "$PYTORCH_VERSION" ]; then \
-        uv pip install --force-reinstall \
+        uv pip install \
           "torch==${PYTORCH_VERSION}" \
           "torchvision==${TORCHVISION_VERSION}" \
           "torchaudio==${TORCHAUDIO_VERSION}" \
           --index-url "${PYTORCH_INDEX_URL}"; \
       else \
-        uv pip install --force-reinstall torch torchvision torchaudio --index-url "${PYTORCH_INDEX_URL}"; \
+        uv pip install torch torchvision torchaudio --index-url "${PYTORCH_INDEX_URL}"; \
       fi; \
     fi
+
+# Install ComfyUI
+RUN set -eu; \
+    SKIP_TORCH=""; \
+    if [ "$ENABLE_PYTORCH_UPGRADE" = "true" ]; then SKIP_TORCH="--skip-torch-or-directml"; fi; \
+    if [ -n "${CUDA_VERSION_FOR_COMFY}" ]; then \
+      /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --cuda-version "${CUDA_VERSION_FOR_COMFY}" --nvidia ${SKIP_TORCH}; \
+    else \
+      /usr/bin/yes | comfy --workspace /comfyui install --version "${COMFYUI_VERSION}" --nvidia ${SKIP_TORCH}; \
+    fi; \
+    if [ -e /comfyui/.venv ] || [ -e /comfyui/venv ]; then \
+      echo "comfy-cli created a workspace venv instead of using /opt/venv" >&2; exit 1; \
+    fi; \
+    /opt/venv/bin/python -c "import torch, torchvision, torchaudio; print('PyTorch', torch.__version__, 'CUDA', torch.version.cuda)"
 
 # Change working directory to ComfyUI
 WORKDIR /comfyui
@@ -109,13 +127,23 @@ COPY handler.py /handler.py
 COPY test_input.json /test_input.json
 
 # Stage 2: Download models
-FROM base AS downloader
+# Deliberately not built on `base`: the downloads only need wget, and keeping this
+# stage independent means a ComfyUI or PyTorch change does not re-download models.
+FROM ${BASE_IMAGE} AS downloader
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends wget ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
 ARG HUGGINGFACE_ACCESS_TOKEN
 ARG CIVITAI_API_TOKEN
 ARG KREAMANIA_FP8_SHA256
 # Set default model type if none is provided
 ARG MODEL_TYPE=enhance
+# Enhancement assets that no General Enhancement graph selects (about 19 GB:
+# Nunchaku FLUX.1-dev FP4, Fluxmania Kreamania FP8, the Q8_0 Qwen projector).
+# Set to "true" to bundle them anyway; Kreamania then needs CIVITAI_API_TOKEN.
+ARG ENHANCE_EXTRA_MODELS=false
 
 # Change working directory to ComfyUI
 WORKDIR /comfyui
@@ -156,20 +184,26 @@ RUN set -eux; \
     if [ "$MODEL_TYPE" = "enhance" ]; then \
       wget -nv -O /comfyui/models/checkpoints/epicrealism_naturalSinRC1VAE.safetensors \
         https://huggingface.co/philz1337x/epicrealism/resolve/main/epicrealism_naturalSinRC1VAE.safetensors; \
-      wget -nv -O /comfyui/models/diffusion_models/svdq-fp4_r32-flux.1-dev.safetensors \
-        https://huggingface.co/nunchaku-ai/nunchaku-flux.1-dev/resolve/main/svdq-fp4_r32-flux.1-dev.safetensors; \
       wget -nv -O /comfyui/models/diffusion_models/svdq-fp4_r32-fluxmania-legacy.safetensors \
         https://huggingface.co/spooknik/Fluxmania-SVDQ/resolve/main/svdq-fp4_r32-fluxmania-legacy.safetensors; \
+    fi
+
+RUN set -eux; \
+    if [ "$MODEL_TYPE" = "enhance" ] && [ "$ENHANCE_EXTRA_MODELS" = "true" ]; then \
+      wget -nv -O /comfyui/models/diffusion_models/svdq-fp4_r32-flux.1-dev.safetensors \
+        https://huggingface.co/nunchaku-ai/nunchaku-flux.1-dev/resolve/main/svdq-fp4_r32-flux.1-dev.safetensors; \
+      wget -nv -O /comfyui/models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf \
+        https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf; \
     fi
 
 # Fluxmania Kreamania (FP8) from Civitai
 # Model page: https://civitai.com/models/778691/fluxmania
 # Version: Kreamania (id=2106807), file: fluxmania_kreamania.safetensors
 RUN set -eu; \
-    if [ "$MODEL_TYPE" = "enhance" ]; then \
+    if [ "$MODEL_TYPE" = "enhance" ] && [ "$ENHANCE_EXTRA_MODELS" = "true" ]; then \
       KREAMANIA_URL="https://civitai.com/api/download/models/2106807?type=Model&format=SafeTensor&size=full&fp=fp8"; \
       KREAMANIA_OUT="/comfyui/models/diffusion_models/fluxmania_kreamania.safetensors"; \
-      if [ -n "${CIVITAI_API_TOKEN}" ]; then \
+      if [ -n "${CIVITAI_API_TOKEN:-}" ]; then \
         # Some Civitai redirects can reject the Authorization header on final storage URL.
         # Prefer token query param, then fall back to public URL for public files.
         if ! wget -nv -O "${KREAMANIA_OUT}" "${KREAMANIA_URL}&token=${CIVITAI_API_TOKEN}"; then \
@@ -179,7 +213,7 @@ RUN set -eu; \
       else \
         wget -nv -O "${KREAMANIA_OUT}" "${KREAMANIA_URL}"; \
       fi; \
-      if [ -n "${KREAMANIA_FP8_SHA256}" ]; then \
+      if [ -n "${KREAMANIA_FP8_SHA256:-}" ]; then \
         echo "${KREAMANIA_FP8_SHA256}  ${KREAMANIA_OUT}" | sha256sum -c -; \
       else \
         echo "WARNING: KREAMANIA_FP8_SHA256 not set; checksum verification skipped for fluxmania_kreamania.safetensors" >&2; \
@@ -202,8 +236,6 @@ RUN set -eux; \
         https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-Q8_0.gguf; \
       wget -nv -O /comfyui/models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-F16.gguf \
         https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-F16.gguf; \
-      wget -nv -O /comfyui/models/llm/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf \
-        https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf; \
     fi
 RUN set -eux; \
     if [ "$MODEL_TYPE" = "enhance" ]; then \
@@ -219,11 +251,25 @@ RUN set -eux; \
         https://github.com/hben35096/assets/releases/download/yolo8/face_yolov8m-seg_60.pt; \
     fi
 
+# Flux autoencoder. The FLUX.1-schnell repository is gated, so it is used only when a
+# token is supplied; otherwise the same file comes from Comfy-Org's ungated repackage.
+# The checksum is the same for both. No xtrace here: it would print the token.
+ARG FLUX_VAE_SHA256=afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38
+ARG FLUX_VAE_UNGATED_URL=https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors
+RUN set -eu; \
+    if [ "$MODEL_TYPE" = "enhance" ]; then \
+      if [ -n "${HUGGINGFACE_ACCESS_TOKEN:-}" ]; then \
+        wget -nv --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
+          -O /comfyui/models/vae/ae.safetensors \
+          https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors; \
+      else \
+        wget -nv -O /comfyui/models/vae/ae.safetensors "${FLUX_VAE_UNGATED_URL}"; \
+      fi; \
+      echo "${FLUX_VAE_SHA256}  /comfyui/models/vae/ae.safetensors" | sha256sum -c -; \
+    fi
+
 RUN set -eux; \
     if [ "$MODEL_TYPE" = "enhance" ]; then \
-      wget -nv --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
-        -O /comfyui/models/vae/ae.safetensors \
-        https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors; \
       wget -nv -O /comfyui/models/text_encoders/clip_l.safetensors \
         https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors; \
       wget -nv -O /comfyui/models/text_encoders/t5xxl_fp8_e4m3fn_scaled.safetensors \
@@ -849,27 +895,36 @@ RUN rm -rf /comfyui/custom_nodes/was-node-suite-comfyui \
  && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
 
 # QwenVL
-ARG QWENVL_COMMIT=main
+ARG QWENVL_COMMIT=1b67b443918801f571714bab636edc1845b7002a
 RUN rm -rf /comfyui/custom_nodes/ComfyUI-QwenVL \
- && git clone https://github.com/1038lab/ComfyUI-QwenVL /comfyui/custom_nodes/ComfyUI-QwenVL \
+ && mkdir -p /comfyui/custom_nodes/ComfyUI-QwenVL \
+ && git init /comfyui/custom_nodes/ComfyUI-QwenVL \
  && cd /comfyui/custom_nodes/ComfyUI-QwenVL \
- && if [ "${QWENVL_COMMIT}" != "main" ]; then git checkout ${QWENVL_COMMIT}; fi \
+ && git remote add origin https://github.com/1038lab/ComfyUI-QwenVL \
+ && git fetch --depth 1 origin ${QWENVL_COMMIT} \
+ && git checkout FETCH_HEAD \
  && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
 
 # Tooling nodes
-ARG TOOLING_COMMIT=main
+ARG TOOLING_COMMIT=b3ae4aa2d98f6ac4284ddbe261e3559c94bd652b
 RUN rm -rf /comfyui/custom_nodes/comfyui-tooling-nodes \
- && git clone https://github.com/Acly/comfyui-tooling-nodes.git /comfyui/custom_nodes/comfyui-tooling-nodes \
+ && mkdir -p /comfyui/custom_nodes/comfyui-tooling-nodes \
+ && git init /comfyui/custom_nodes/comfyui-tooling-nodes \
  && cd /comfyui/custom_nodes/comfyui-tooling-nodes \
- && if [ "${TOOLING_COMMIT}" != "main" ]; then git checkout ${TOOLING_COMMIT}; fi \
+ && git remote add origin https://github.com/Acly/comfyui-tooling-nodes.git \
+ && git fetch --depth 1 origin ${TOOLING_COMMIT} \
+ && git checkout FETCH_HEAD \
  && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
 
 # Post-processing nodes
-ARG POST_COMMIT=main
+ARG POST_COMMIT=c49a05254795403648f2c1774b6f5ea39f96e7d5
 RUN rm -rf /comfyui/custom_nodes/ComfyUI-post-processing-nodes \
- && git clone https://github.com/EllangoK/ComfyUI-post-processing-nodes.git /comfyui/custom_nodes/ComfyUI-post-processing-nodes \
+ && mkdir -p /comfyui/custom_nodes/ComfyUI-post-processing-nodes \
+ && git init /comfyui/custom_nodes/ComfyUI-post-processing-nodes \
  && cd /comfyui/custom_nodes/ComfyUI-post-processing-nodes \
- && if [ "${POST_COMMIT}" != "main" ]; then git checkout ${POST_COMMIT}; fi \
+ && git remote add origin https://github.com/EllangoK/ComfyUI-post-processing-nodes.git \
+ && git fetch --depth 1 origin ${POST_COMMIT} \
+ && git checkout FETCH_HEAD \
  && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
 
 # --------------------------------------------------
@@ -886,6 +941,34 @@ RUN rm -rf /comfyui/custom_nodes/ComfyUI-nunchaku \
 # Offline versions file
 RUN curl -fsSL https://nunchaku.tech/cdn/nunchaku_versions.json \
   -o /comfyui/custom_nodes/ComfyUI-nunchaku/nunchaku_versions.json
+
+# ComfyUI-nunchaku imports apply_rotary_emb from ComfyUI's Qwen-Image model. ComfyUI
+# releases that do not export it break the import of the whole node package,
+# NunchakuFluxDiTLoader included, so use the equivalent Flux helper there.
+RUN /opt/venv/bin/python - <<'PY'
+from pathlib import Path
+
+comfy_model = Path("/comfyui/comfy/ldm/qwen_image/model.py")
+target = Path("/comfyui/custom_nodes/ComfyUI-nunchaku/models/qwenimage.py")
+text = target.read_text()
+old = """    QwenImageTransformer2DModel,
+    QwenTimestepProjEmbeddings,
+    apply_rotary_emb,
+)
+"""
+new = """    QwenImageTransformer2DModel,
+    QwenTimestepProjEmbeddings,
+)
+from comfy.ldm.flux.math import apply_rope1 as apply_rotary_emb
+"""
+if "def apply_rotary_emb" in comfy_model.read_text():
+    print("ComfyUI exports apply_rotary_emb; ComfyUI-nunchaku left unpatched")
+elif old in text:
+    target.write_text(text.replace(old, new))
+    print("Patched ComfyUI-nunchaku models/qwenimage.py to use apply_rope1")
+else:
+    raise SystemExit("ComfyUI-nunchaku models/qwenimage.py has an unexpected import block; review this patch")
+PY
 
 # Nunchaku backend wheel
 ARG NUNCHAKU_WHEEL_URL=https://github.com/nunchaku-ai/nunchaku/releases/download/v1.2.1/nunchaku-1.2.1+cu12.8torch2.10-cp312-cp312-linux_x86_64.whl
@@ -1032,21 +1115,84 @@ PY
 
 # Thin-layer custom node install: ComfyUI-Inpaint-CropAndStitch
 # Keep this in final-enhance so we can add/fix nodes without rebuilding heavy core layers.
-ARG CROP_STITCH_COMMIT=main
+ARG CROP_STITCH_COMMIT=8584b08d851762965df898b421a39075fc5357ae
 RUN rm -rf /comfyui/custom_nodes/ComfyUI-Inpaint-CropAndStitch \
- && git clone https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch.git /comfyui/custom_nodes/ComfyUI-Inpaint-CropAndStitch \
+ && mkdir -p /comfyui/custom_nodes/ComfyUI-Inpaint-CropAndStitch \
+ && git init /comfyui/custom_nodes/ComfyUI-Inpaint-CropAndStitch \
  && cd /comfyui/custom_nodes/ComfyUI-Inpaint-CropAndStitch \
- && if [ "${CROP_STITCH_COMMIT}" != "main" ]; then git checkout ${CROP_STITCH_COMMIT}; fi \
+ && git remote add origin https://github.com/lquesada/ComfyUI-Inpaint-CropAndStitch.git \
+ && git fetch --depth 1 origin ${CROP_STITCH_COMMIT} \
+ && git checkout FETCH_HEAD \
  && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
 
 # Thin-layer custom node install: ComfyUI-KJNodes
 # Keep this in final-enhance so we can add/fix nodes without rebuilding heavy core layers.
-ARG KJNODES_COMMIT=main
+ARG KJNODES_COMMIT=d3cfe21625e5170126ce06fbfcfe1d88108688c3
 RUN rm -rf /comfyui/custom_nodes/ComfyUI-KJNodes \
- && git clone https://github.com/kijai/ComfyUI-KJNodes.git /comfyui/custom_nodes/ComfyUI-KJNodes \
+ && mkdir -p /comfyui/custom_nodes/ComfyUI-KJNodes \
+ && git init /comfyui/custom_nodes/ComfyUI-KJNodes \
  && cd /comfyui/custom_nodes/ComfyUI-KJNodes \
- && if [ "${KJNODES_COMMIT}" != "main" ]; then git checkout ${KJNODES_COMMIT}; fi \
+ && git remote add origin https://github.com/kijai/ComfyUI-KJNodes.git \
+ && git fetch --depth 1 origin ${KJNODES_COMMIT} \
+ && git checkout FETCH_HEAD \
  && if [ -f requirements.txt ]; then /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt; fi
+
+# ComfyUI-QwenVL resolves its models under models/LLM/GGUF and only falls back to an
+# all-lowercase llm/gguf, while the files are bundled under models/llm/GGUF. Without
+# this link the node still finds the model through its recursive search, but not the
+# vision projector, and downloads it from Hugging Face on every cold start.
+RUN [ -e /comfyui/models/LLM ] || ln -s llm /comfyui/models/LLM
+
+# Start ComfyUI once on the CPU and fail the build if a custom node cannot be imported.
+RUN cd /comfyui \
+ && if ! /opt/venv/bin/python main.py --cpu --quick-test-for-ci --disable-auto-launch > /tmp/comfy-imports.log 2>&1 \
+      || grep -F "(IMPORT FAILED)" /tmp/comfy-imports.log \
+      || ! grep -q "Import times for custom nodes" /tmp/comfy-imports.log; then \
+      cat /tmp/comfy-imports.log; echo "ComfyUI did not start cleanly or a custom node failed to import" >&2; exit 1; \
+    fi \
+ && rm -f /tmp/comfy-imports.log /comfyui/user/comfyui*.log
+
+# Fail the build, rather than the first job, when the final environment no longer
+# matches the Nunchaku wheel's ABI or a workflow model is missing or altered.
+RUN --mount=type=bind,source=workflows/general-enhancement/models.sha256,target=/tmp/models.sha256 \
+    /opt/venv/bin/python - <<'PY'
+import importlib.metadata as metadata
+import json
+import re
+import subprocess
+from pathlib import Path
+
+import torch
+
+wheel = metadata.version("nunchaku")
+match = re.search(r"\+cu([\d.]+)torch([\d.]+)$", wheel)
+if not match:
+    raise SystemExit(f"Cannot read the CUDA/PyTorch ABI from nunchaku {wheel}")
+cuda, torch_series = match.groups()
+if torch.version.cuda != cuda or not torch.__version__.startswith(torch_series + "."):
+    raise SystemExit(
+        f"nunchaku {wheel} needs PyTorch {torch_series}.x with CUDA {cuda}, "
+        f"but the image has PyTorch {torch.__version__} with CUDA {torch.version.cuda}"
+    )
+import nunchaku  # noqa: F401  (the compiled extension must load against this PyTorch)
+
+for venv in ("/comfyui/.venv", "/comfyui/venv"):
+    if Path(venv).exists():
+        raise SystemExit(f"{venv} exists: dependencies were installed outside /opt/venv")
+
+subprocess.run(["sha256sum", "--check", "--quiet", "/tmp/models.sha256"], check=True)
+
+# The Qwen model and its projector must be where this ComfyUI-QwenVL version looks.
+qwenvl = Path("/comfyui/custom_nodes/ComfyUI-QwenVL")
+catalog = json.loads((qwenvl / "gguf_models.json").read_text())
+entry = catalog["qwenVL_model"]["Qwen3-VL-4B-Instruct-GGUF"]
+qwen_dir = Path("/comfyui/models", catalog["base_dir"], entry["author"], entry["repo_name"])
+for name in ("Qwen3VL-4B-Instruct-Q8_0.gguf", entry["mmproj_file"]):
+    if not (qwen_dir / name).is_file():
+        raise SystemExit(f"{qwen_dir / name} is missing: ComfyUI-QwenVL would download it at runtime")
+
+print(f"final-enhance OK: PyTorch {torch.__version__}, CUDA {torch.version.cuda}, nunchaku {wheel}, models verified")
+PY
 
 # Add runtime worker entrypoint files as the last layer for fast handler-only rebuilds
 COPY --from=runtime-files /start.sh /network_volume.py /handler.py /test_input.json /

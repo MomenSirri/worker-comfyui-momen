@@ -2,3 +2,5 @@
 *.sh text eol=lf
 # Preserve the audited workflow bytes and its published SHA256.
 workflows/general-enhancement/workflow_api_flux_dev_1.19.json -text
+# Heredoc and continuation lines must reach the Linux builder with LF.
+Dockerfile text eol=lf

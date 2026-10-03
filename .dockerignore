@@ -25,3 +25,8 @@ models/**
 !models/LLM/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/
 !models/LLM/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/Qwen3VL-4B-Instruct-Q8_0.gguf
 !models/LLM/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-F16.gguf
+
+# Local run artefacts (Compose volumes, build logs, test outputs)
+data
+general-enhancement-input.json
+general-enhancement-result.json

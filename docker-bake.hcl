@@ -51,6 +51,11 @@ variable "KREAMANIA_FP8_SHA256" {
   default = ""
 }
 
+# Bundle enhancement assets that no General Enhancement graph selects (about 19 GB).
+variable "ENHANCE_EXTRA_MODELS" {
+  default = "false"
+}
+
 variable "ENHANCE_CORE_IMAGE" {
   # Default to local build stage alias; override with a pushed core image to skip heavy rebuilds.
   # Example override:
@@ -331,7 +336,12 @@ target "enhance" {
     CUDA_VERSION_FOR_COMFY = ""
     ENABLE_PYTORCH_UPGRADE = "true"
     PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
+    # The bundled Nunchaku wheel is built for PyTorch 2.10 / CUDA 12.8.
+    PYTORCH_VERSION = "2.10.0"
+    TORCHVISION_VERSION = "0.25.0"
+    TORCHAUDIO_VERSION = "2.10.0"
     MODEL_TYPE = "enhance"
+    ENHANCE_EXTRA_MODELS = "${ENHANCE_EXTRA_MODELS}"
     HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
     CIVITAI_API_TOKEN = "${CIVITAI_API_TOKEN}"
     KREAMANIA_FP8_SHA256 = "${KREAMANIA_FP8_SHA256}"
@@ -353,7 +363,12 @@ target "enhance-core" {
     CUDA_VERSION_FOR_COMFY = ""
     ENABLE_PYTORCH_UPGRADE = "true"
     PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
+    # The bundled Nunchaku wheel is built for PyTorch 2.10 / CUDA 12.8.
+    PYTORCH_VERSION = "2.10.0"
+    TORCHVISION_VERSION = "0.25.0"
+    TORCHAUDIO_VERSION = "2.10.0"
     MODEL_TYPE = "enhance"
+    ENHANCE_EXTRA_MODELS = "${ENHANCE_EXTRA_MODELS}"
     HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
     CIVITAI_API_TOKEN = "${CIVITAI_API_TOKEN}"
     KREAMANIA_FP8_SHA256 = "${KREAMANIA_FP8_SHA256}"

@@ -43,17 +43,21 @@ docker build --target final-flux2-klein -t momensirribrick/flux2-klein9b:v04 \
 # flux2-klein via bake
 docker buildx bake -f docker-bake.hcl flux2-klein-cuda12-8-1 --push
 
-# general-enhancement (includes Civitai token + optional checksum verification)
-docker build --target final-enhance -t momensirribrick/general-enhancement:v05 \
+# general-enhancement
+# No tokens are needed. PyTorch must stay on 2.10.0: the bundled Nunchaku wheel is built for it.
+# Add --build-arg ENHANCE_EXTRA_MODELS=true (plus CIVITAI_API_TOKEN / KREAMANIA_FP8_SHA256)
+# only to bundle the models that no enhancement graph selects.
+docker buildx build --platform linux/amd64 --load \
+  --target final-enhance -t momensirribrick/general-enhancement:v07 \
   --build-arg BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04 \
-  --build-arg COMFYUI_VERSION=latest \
+  --build-arg COMFYUI_VERSION=0.38.0 \
   --build-arg CUDA_VERSION_FOR_COMFY= \
   --build-arg ENABLE_PYTORCH_UPGRADE=true \
   --build-arg PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 \
+  --build-arg PYTORCH_VERSION=2.10.0 \
+  --build-arg TORCHVISION_VERSION=0.25.0 \
+  --build-arg TORCHAUDIO_VERSION=2.10.0 \
   --build-arg MODEL_TYPE=enhance \
-  --build-arg HUGGINGFACE_ACCESS_TOKEN \
-  --build-arg CIVITAI_API_TOKEN \
-  --build-arg KREAMANIA_FP8_SHA256 \
   .
 
 # --------------------------------------------------
