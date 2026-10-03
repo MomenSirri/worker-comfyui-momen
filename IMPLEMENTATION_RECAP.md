@@ -208,7 +208,13 @@ Result:
 
 ## 6.1 Final output format alignment
 
-Handler success returns:
+> Superseded. Since the published `general-enhancement:v06` image the handler returns
+> `{"images": [{"filename": ..., "type": "s3_url" | "base64", "data": ...}]}`, the shape in
+> the main README and the one the AZ-AI backend validates. The `status`/`message` shape
+> below is what the `v01`–`v05` images returned; a client that still reads `output.message`
+> has to read `output.images[].data` instead.
+
+Handler success returned:
 
 ```json
 {

@@ -61,6 +61,17 @@ class ImageInputTests(unittest.TestCase):
         self.assertEqual(self.upload([{"name": "image.png", "image": "https://example.com/image"}])["status"], "error")
         self.requests.post.assert_not_called()
 
+    def test_download_errors_do_not_expose_the_signed_url(self):
+        url = "https://bucket.example.com/prompts/key.png?X-Amz-Signature=secret-signature"
+        failure = ConnectionError(f"403 Client Error: Forbidden for url: {url}")
+        failure.response = SimpleNamespace(status_code=403)
+        self.download().raise_for_status.side_effect = failure
+        result = self.upload([{"name": "image.png", "image": url}])
+        self.assertEqual(result["status"], "error")
+        self.assertIn("HTTP 403", result["details"][0])
+        self.assertNotIn("secret-signature", str(result))
+        self.assertNotIn("bucket.example.com", str(result))
+
 
 if __name__ == "__main__":
     unittest.main()

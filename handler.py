@@ -127,7 +127,7 @@ def _failure_result(error_message, details=None):
     return result
 
 
-def _finalize_job_result(output_messages, errors=None, warnings=None):
+def _finalize_job_result(output_images, errors=None, warnings=None):
     """
     Build the terminal handler response.
 
@@ -135,12 +135,12 @@ def _finalize_job_result(output_messages, errors=None, warnings=None):
     a "successful" response with zero images leaves clients with an ambiguous state,
     so no-image completions are treated as failures with details.
     """
-    output_messages = output_messages or []
+    output_images = output_images or []
     errors = errors or []
     warnings = warnings or []
 
-    if output_messages:
-        return {"status": "success", "message": output_messages}
+    if output_images:
+        return {"images": output_images}
 
     details = [str(item) for item in [*errors, *warnings] if str(item).strip()]
     if not details:
@@ -958,19 +958,29 @@ def upload_images(images):
             if image_data_uri.lower().startswith(("http://", "https://")):
                 # Stream downloads to bound memory use, including chunked responses.
                 max_bytes = 50 * 1024 * 1024
-                with requests.get(image_data_uri, stream=True, timeout=(10, 60)) as downloaded:
-                    downloaded.raise_for_status()
-                    mime_type = downloaded.headers.get("Content-Type", "image/png").split(";", 1)[0]
-                    if not mime_type.startswith("image/") and mime_type != "application/octet-stream":
-                        raise ValueError("Image URL did not return an image")
-                    buffer = BytesIO()
-                    for chunk in downloaded.iter_content(chunk_size=64 * 1024):
-                        if buffer.tell() + len(chunk) > max_bytes:
-                            raise ValueError("Image URL exceeds the 50 MiB download limit")
-                        buffer.write(chunk)
-                    blob = buffer.getvalue()
-                    if not blob:
-                        raise ValueError("Image URL returned an empty response")
+                try:
+                    with requests.get(image_data_uri, stream=True, timeout=(10, 60)) as downloaded:
+                        downloaded.raise_for_status()
+                        mime_type = downloaded.headers.get("Content-Type", "image/png").split(";", 1)[0]
+                        if not mime_type.startswith("image/") and mime_type != "application/octet-stream":
+                            raise ValueError("Image URL did not return an image")
+                        buffer = BytesIO()
+                        for chunk in downloaded.iter_content(chunk_size=64 * 1024):
+                            if buffer.tell() + len(chunk) > max_bytes:
+                                raise ValueError("Image URL exceeds the 50 MiB download limit")
+                            buffer.write(chunk)
+                        blob = buffer.getvalue()
+                        if not blob:
+                            raise ValueError("Image URL returned an empty response")
+                # A signed URL is a credential, and requests puts the URL with its
+                # query string into its error messages. Report only the failure kind
+                # so the link reaches neither the worker log nor the job output.
+                except requests.Timeout:
+                    raise ValueError("Timed out downloading the image URL") from None
+                except requests.RequestException as e:
+                    status = getattr(getattr(e, "response", None), "status_code", None)
+                    reason = f"HTTP {status}" if status else type(e).__name__
+                    raise ValueError(f"Image URL download failed ({reason})") from None
             elif "," in image_data_uri:
                 # Find the comma and take everything after it
                 base64_data = image_data_uri.split(",", 1)[1]
@@ -1283,7 +1293,7 @@ def handler(job):
     ws = None
     client_id = str(uuid.uuid4())
     prompt_id = None
-    output_messages = []
+    output_images = []
     errors = []
     warnings = []
     progress_state = {
@@ -1919,10 +1929,18 @@ def handler(job):
                                 print(f"worker-comfyui - Uploading {filename} to S3...")
                                 s3_url = rp_upload.upload_image(job_id, temp_file_path)
                                 os.remove(temp_file_path)  # Clean up temp file
+                                # The presigned query string grants read access for a
+                                # week; log the object location only.
                                 print(
-                                    f"worker-comfyui - Uploaded {filename} to S3: {s3_url}"
+                                    f"worker-comfyui - Uploaded {filename} to S3: {str(s3_url).split('?', 1)[0]}"
                                 )
-                                output_messages.append(s3_url)
+                                output_images.append(
+                                    {
+                                        "data": s3_url,
+                                        "filename": filename,
+                                        "type": "s3_url",
+                                    }
+                                )
                             except Exception as e:
                                 error_msg = f"Error uploading {filename} to S3: {e}"
                                 print(f"worker-comfyui - {error_msg}")
@@ -1942,7 +1960,13 @@ def handler(job):
                                 base64_image = base64.b64encode(image_bytes).decode(
                                     "utf-8"
                                 )
-                                output_messages.append(base64_image)
+                                output_images.append(
+                                    {
+                                        "data": base64_image,
+                                        "filename": filename,
+                                        "type": "base64",
+                                    }
+                                )
                                 print(f"worker-comfyui - Encoded {filename} as base64")
                             except Exception as e:
                                 error_msg = f"Error encoding {filename} to base64: {e}"
@@ -1994,7 +2018,7 @@ def handler(job):
     if warnings:
         print(f"worker-comfyui - Job completed with warnings: {warnings}")
 
-    final_result = _finalize_job_result(output_messages, errors=errors, warnings=warnings)
+    final_result = _finalize_job_result(output_images, errors=errors, warnings=warnings)
     if "error" in final_result:
         print(f"worker-comfyui - Job failed with no output images.")
         _safe_progress_update(
@@ -2007,7 +2031,7 @@ def handler(job):
 
     # Avoid sending progress updates after output is finalized.
     # RunPod may process late progress events out-of-order and keep request state IN_PROGRESS.
-    print(f"worker-comfyui - Job completed. Returning {len(output_messages)} image(s).")
+    print(f"worker-comfyui - Job completed. Returning {len(output_images)} image(s).")
     return final_result
 
 

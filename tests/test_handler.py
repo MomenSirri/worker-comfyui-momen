@@ -15,8 +15,12 @@ RUNPOD_WORKER_COMFY_TEST_RESOURCES_IMAGES = "./test_resources/images"
 
 class TestRunpodWorkerComfy(unittest.TestCase):
     def test_finalize_job_result_success_with_images(self):
-        result = handler._finalize_job_result(["img1", "img2"])
-        self.assertEqual(result, {"status": "success", "message": ["img1", "img2"]})
+        images = [
+            {"data": "https://bucket.example.com/job/a.png", "filename": "a.png", "type": "s3_url"},
+            {"data": "aW1n", "filename": "b.png", "type": "base64"},
+        ]
+        result = handler._finalize_job_result(images)
+        self.assertEqual(result, {"images": images})
 
     def test_finalize_job_result_fails_when_no_images(self):
         result = handler._finalize_job_result([], warnings=["Node 55 produced unhandled output keys: ['text']."])

@@ -55,6 +55,10 @@ def main():
             for name, definition in schema.get(group, {}).items():
                 value = node["inputs"].get(name)
                 if isinstance(value, (str, int, float, bool)) and definition and isinstance(definition[0], list):
+                    # The worker uploads the input from input.images when the job runs,
+                    # so it is not in ComfyUI's input folder during this preflight.
+                    if class_type == "LoadImage" and value == filename:
+                        continue
                     if value not in definition[0]:
                         errors.append(f"Node {node_id} ({class_type}): {name}={value!r} is unavailable")
         for name, definition in schema.get("required", {}).items():
@@ -69,10 +73,12 @@ def main():
         Path("general-enhancement-result.json").write_text(json.dumps(response, indent=2), encoding="utf-8")
         print("Saved response to general-enhancement-result.json")
         output = response.get("output", {})
-        print("Job status:", response.get("status"), "Worker status:", output.get("status") if isinstance(output, dict) else None)
-        if not isinstance(output, dict) or output.get("status") != "success":
-            raise SystemExit("Job did not return worker success; inspect the result file and container logs.")
-        print("Returned images:", len(output.get("message", [])))
+        images = output.get("images") if isinstance(output, dict) else None
+        print("Job status:", response.get("status"), "Returned images:", len(images or []))
+        if response.get("status") != "COMPLETED" or not images:
+            raise SystemExit("Job did not return images; inspect the result file and container logs.")
+        for image in images:
+            print(" ", image.get("filename"), image.get("type"))
 
 
 if __name__ == "__main__":
