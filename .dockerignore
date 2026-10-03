@@ -1,0 +1,27 @@
+.git
+.idea
+.venv
+__pycache__
+*.log
+*.pid
+models.zip
+
+# The Dockerfile only packages selected local workflow models. Exclude every
+# other model file from the build context so accidental multi-GB additions fail.
+models/**
+!models/loras/
+!models/loras/**
+!models/SEEDVR2/
+!models/SEEDVR2/seedvr2_ema_7b_sharp_fp8_e4m3fn_mixed_block35_fp16.safetensors
+!models/diffusion_models/
+!models/diffusion_models/flux-2-klein-9b-fp8.safetensors
+!models/text_encoders/
+!models/text_encoders/qwen_3_8b_fp8mixed.safetensors
+!models/vae/
+!models/vae/full_encoder_small_decoder.safetensors
+!models/LLM/
+!models/LLM/GGUF/
+!models/LLM/GGUF/Qwen/
+!models/LLM/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/
+!models/LLM/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/Qwen3VL-4B-Instruct-Q8_0.gguf
+!models/LLM/GGUF/Qwen/Qwen3-VL-4B-Instruct-GGUF/mmproj-Qwen3VL-4B-Instruct-F16.gguf

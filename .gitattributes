@@ -1,0 +1,4 @@
+# Linux entrypoints must remain executable on Windows checkouts as well.
+*.sh text eol=lf
+# Preserve the audited workflow bytes and its published SHA256.
+workflows/general-enhancement/workflow_api_flux_dev_1.19.json -text

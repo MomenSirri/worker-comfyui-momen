@@ -10,6 +10,9 @@ ARG COMFYUI_VERSION=latest
 ARG CUDA_VERSION_FOR_COMFY
 ARG ENABLE_PYTORCH_UPGRADE=false
 ARG PYTORCH_INDEX_URL
+ARG PYTORCH_VERSION
+ARG TORCHVISION_VERSION
+ARG TORCHAUDIO_VERSION
 
 # Prevents prompts from packages asking for user input during installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -60,7 +63,15 @@ RUN if [ -n "${CUDA_VERSION_FOR_COMFY}" ]; then \
 
 # Upgrade PyTorch if needed (for newer CUDA versions)
 RUN if [ "$ENABLE_PYTORCH_UPGRADE" = "true" ]; then \
-      uv pip install --force-reinstall torch torchvision torchaudio --index-url ${PYTORCH_INDEX_URL}; \
+      if [ -n "$PYTORCH_VERSION" ]; then \
+        uv pip install --force-reinstall \
+          "torch==${PYTORCH_VERSION}" \
+          "torchvision==${TORCHVISION_VERSION}" \
+          "torchaudio==${TORCHAUDIO_VERSION}" \
+          --index-url "${PYTORCH_INDEX_URL}"; \
+      else \
+        uv pip install --force-reinstall torch torchvision torchaudio --index-url "${PYTORCH_INDEX_URL}"; \
+      fi; \
     fi
 
 # Change working directory to ComfyUI
@@ -348,6 +359,11 @@ FROM base AS final
 
 # Copy models from stage 2 to the final image
 COPY --from=downloader /comfyui/models /comfyui/models
+
+# comfy-cli creates its own workspace venv while the runtime entrypoint uses
+# /opt/venv. Install core requirements into the actual runtime environment.
+RUN /opt/venv/bin/python -m pip install --no-cache-dir -r /comfyui/requirements.txt \
+ && /opt/venv/bin/python -c "import sqlalchemy, torch; print('ComfyUI runtime dependencies OK:', 'SQLAlchemy', sqlalchemy.__version__, 'torch', torch.__version__, 'CUDA', torch.version.cuda)"
 
 # --- NEW: flux2-klein image variant with bundled LoRAs ---
 FROM final AS final-flux2-klein

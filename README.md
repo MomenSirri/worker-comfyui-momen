@@ -12,6 +12,8 @@
 
 This project allows you to run ComfyUI workflows as a serverless API endpoint on the RunPod platform. Submit workflows via API calls and receive generated images as base64 strings or S3 URLs.
 
+For the `general-enhancement` image, see the dedicated [General Enhancement build and setup guide](README-General-Enhancement.md), including the audited v1.19 workflow, model/node inventory, GPU compatibility, and API test instructions.
+
 ## Table of Contents
 
 - [Quickstart](#quickstart)
@@ -92,7 +94,15 @@ Each object within the `input.images` array must contain:
 | Field Name | Type   | Required | Description                                                                                                                       |
 | ---------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `name`     | String | Yes      | Filename used to reference the image in the workflow (e.g., via a "Load Image" node). Must be unique within the array.            |
-| `image`    | String | Yes      | Base64 encoded string of the image. A data URI prefix (e.g., `data:image/png;base64,`) is optional and will be handled correctly. |
+| `image`    | String | Yes      | HTTP(S) image URL or base64 encoded image. An optional data URI prefix (e.g., `data:image/png;base64,`) is supported. |
+
+URL input example (reference `reference.png` in your workflow's Load Image node):
+
+```json
+{"name": "reference.png", "image": "https://example.com/reference.png"}
+```
+
+URLs must be accessible from the worker without additional authentication headers. Signed URLs are supported. Downloads follow redirects, use a 10-second connection timeout and 60-second read timeout, and are limited to 50 MiB per image. The response must have an image content type or `application/octet-stream`.
 
 > [!NOTE]
 >

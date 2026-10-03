@@ -933,10 +933,10 @@ def check_server(
 
 def upload_images(images):
     """
-    Upload a list of base64 encoded images to the ComfyUI server using the /upload/image endpoint.
+    Upload base64 or HTTP(S) images to ComfyUI using /upload/image.
 
     Args:
-        images (list): A list of dictionaries, each containing the 'name' of the image and the 'image' as a base64 encoded string.
+        images (list): Dictionaries containing 'name' and 'image' (base64 or URL).
 
     Returns:
         dict: A dictionary indicating success or error.
@@ -954,20 +954,37 @@ def upload_images(images):
             name = image["name"]
             image_data_uri = image["image"]  # Get the full string (might have prefix)
 
-            # --- Strip Data URI prefix if present ---
-            if "," in image_data_uri:
+            mime_type = "image/png"
+            if image_data_uri.lower().startswith(("http://", "https://")):
+                # Stream downloads to bound memory use, including chunked responses.
+                max_bytes = 50 * 1024 * 1024
+                with requests.get(image_data_uri, stream=True, timeout=(10, 60)) as downloaded:
+                    downloaded.raise_for_status()
+                    mime_type = downloaded.headers.get("Content-Type", "image/png").split(";", 1)[0]
+                    if not mime_type.startswith("image/") and mime_type != "application/octet-stream":
+                        raise ValueError("Image URL did not return an image")
+                    buffer = BytesIO()
+                    for chunk in downloaded.iter_content(chunk_size=64 * 1024):
+                        if buffer.tell() + len(chunk) > max_bytes:
+                            raise ValueError("Image URL exceeds the 50 MiB download limit")
+                        buffer.write(chunk)
+                    blob = buffer.getvalue()
+                    if not blob:
+                        raise ValueError("Image URL returned an empty response")
+            elif "," in image_data_uri:
                 # Find the comma and take everything after it
                 base64_data = image_data_uri.split(",", 1)[1]
+                blob = base64.b64decode(base64_data)
             else:
                 # Assume it's already pure base64
                 base64_data = image_data_uri
+                blob = base64.b64decode(base64_data)
             # --- End strip ---
 
-            blob = base64.b64decode(base64_data)  # Decode the cleaned data
 
             # Prepare the form data
             files = {
-                "image": (name, BytesIO(blob), "image/png"),
+                "image": (name, BytesIO(blob), mime_type),
                 "overwrite": (None, "true"),
             }
 
