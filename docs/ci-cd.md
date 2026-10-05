@@ -10,7 +10,7 @@
 - `docker buildx bake --print` for every target, so a broken Bake file fails here;
 - the format of the model checksum lists.
 
-GitHub Actions must be enabled once for this repository (the **Actions** tab), or the workflow never starts.
+Its first run, on 2026-10-05, passed every step ([run 37358008640](https://github.com/MomenSirri/worker-comfyui-momen/actions/runs/37358008640)).
 
 Run the same checks locally:
 
