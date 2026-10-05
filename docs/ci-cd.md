@@ -1,31 +1,34 @@
 # CI/CD
 
-This project includes GitHub Actions workflows to automatically build and deploy Docker images to Docker Hub.
+## What runs automatically
 
-## Automatic Deployment to Docker Hub with GitHub Actions
+[`ci.yml`](../.github/workflows/ci.yml) runs on every push, on a standard GitHub runner, in a few minutes. It needs no GPU, no models and no secrets:
 
-The repository contains two workflows located in the `.github/workflows` directory:
+- the Python unit tests (`tests/`) and the snapshot restore script test;
+- a syntax check of every shell script and build helper;
+- Docker's Dockerfile checks (`docker buildx build --check .`);
+- `docker buildx bake --print` for every target, so a broken Bake file fails here;
+- the format of the model checksum lists.
 
-- [`dev.yml`](../.github/workflows/dev.yml): Creates the images (base, sdxl, sd3, flux variants) and pushes them to Docker Hub tagged as `<image_name>:dev` on every push to the `main` branch.
-- [`release.yml`](../.github/workflows/release.yml): Creates the images and pushes them to Docker Hub tagged as `<image_name>:latest` and `<image_name>:<release_version>` (e.g., `worker-comfyui:3.7.0`). This workflow is triggered only when a new release is created on GitHub.
+GitHub Actions must be enabled once for this repository (the **Actions** tab), or the workflow never starts.
 
-### Configuration for Your Fork
+Run the same checks locally:
 
-If you have forked this repository and want to use these actions to publish images to your own Docker Hub account, you need to configure the following in your GitHub repository settings:
+```bash
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -p "test_*.py"
+docker buildx build --check .
+docker buildx bake -f docker-bake.hcl --print enhance seedvr
+```
 
-1.  **Secrets** (`Settings > Secrets and variables > Actions > New repository secret`):
+## What does not run automatically
 
-    | Secret Name                | Description                                                                | Example Value       |
-    | -------------------------- | -------------------------------------------------------------------------- | ------------------- |
-    | `DOCKERHUB_USERNAME`       | Your Docker Hub username.                                                  | `your-dockerhub-id` |
-    | `DOCKERHUB_TOKEN`          | Your Docker Hub access token with read/write permissions.                  | `dckr_pat_...`      |
-    | `HUGGINGFACE_ACCESS_TOKEN` | Your READ access token from Hugging Face (required only for building SD3). | `hf_...`            |
+Images are built and pushed by hand, with the commands in [command.txt](../command.txt) and [README-General-Enhancement.md](../README-General-Enhancement.md). Each image is 30 GB or more and needs more disk than a hosted runner has.
 
-2.  **Variables** (`Settings > Secrets and variables > Actions > New repository variable`):
+The upstream project's release workflows were removed from this fork on 2026-10-05. They targeted runners this repository does not have, published under another image name, and had never run here.
 
-    | Variable Name    | Description                                                                  | Example Value              |
-    | ---------------- | ---------------------------------------------------------------------------- | -------------------------- |
-    | `DOCKERHUB_REPO` | The target repository (namespace) on Docker Hub where images will be pushed. | `your-dockerhub-id`        |
-    | `DOCKERHUB_IMG`  | The base name for the image to be pushed to Docker Hub.                      | `my-custom-worker-comfyui` |
+## Before publishing an image
 
-With these secrets and variables configured, the actions will push the built images (e.g., `your-dockerhub-id/my-custom-worker-comfyui:dev`, `your-dockerhub-id/my-custom-worker-comfyui:1.0.0`, `your-dockerhub-id/my-custom-worker-comfyui:latest`) to your Docker Hub account when triggered.
+1. Choose a tag that does not exist on Docker Hub yet. A push to an existing tag replaces it, and an endpoint that uses that tag changes with it.
+2. Commit and push the source first, so the published image can be traced to a commit. [published-images.md](published-images.md) records what happened when that was skipped.
+3. After the build, record the image digest and `pip freeze` next to the workflow, as `workflows/general-enhancement/pip-freeze-v07.txt` does.

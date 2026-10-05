@@ -1,0 +1,68 @@
+name: CI
+
+# Fast checks that need no GPU, no models and no secrets. Images are built and
+# pushed by hand (see docs/ci-cd.md): they are tens of gigabytes.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the worker requirements
+        run: python -m pip install -r requirements.txt
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Snapshot restore script test
+        run: bash tests/test_restore_snapshot.sh
+
+      - name: Shell script syntax
+        run: |
+          for script in scripts/*.sh scripts/build/*.sh src/*.sh; do
+            bash -n "$script"
+          done
+
+      - name: Python build helper syntax
+        run: python -m py_compile scripts/build/*.py scripts/*.py
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Dockerfile checks
+        run: docker buildx build --check .
+
+      - name: Bake file resolves every target
+        run: |
+          docker buildx bake -f docker-bake.hcl --print \
+            base base-cuda12-8-1 sd3 flux1-schnell flux1-dev z-image-turbo \
+            flux2-klein flux2-klein-cuda12-8-1 \
+            refrence_gen_sdxl_flux2_klein refrence_gen_sdxl_flux2_klein-cuda12-8-1 \
+            seedvr seedvr-cuda12-8-1 enhance-core enhance > /dev/null
+
+      - name: Model checksum lists are well formed
+        run: |
+          for list in workflows/*/models.sha256; do
+            if grep -vqE '^[0-9a-f]{64}  /comfyui/models/[^ ]+$' "$list"; then
+              echo "$list has a malformed line" >&2
+              exit 1
+            fi
+          done
