@@ -2,5 +2,9 @@
 *.sh text eol=lf
 # Preserve the audited workflow bytes and its published SHA256.
 workflows/general-enhancement/workflow_api_flux_dev_1.19.json -text
-# Heredoc and continuation lines must reach the Linux builder with LF.
+# Continuation lines must reach the Linux builder with LF.
 Dockerfile text eol=lf
+# Read inside the Linux build: `sha256sum --check` treats a CR as part of the file name.
+workflows/*/models.sha256 text eol=lf
+constraints/*.txt text eol=lf
+requirements.txt text eol=lf

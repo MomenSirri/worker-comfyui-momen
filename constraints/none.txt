@@ -1,0 +1,2 @@
+# Empty pip/uv constraints file: the default for images without a recorded version lock.
+# See constraints/general-enhancement-v07.txt for a real one.

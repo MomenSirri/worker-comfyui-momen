@@ -1,6 +1,6 @@
 # General Enhancement — build and setup
 
-This guide covers Bake target `enhance`, Docker target `final-enhance`, and image `momensirribrick/general-enhancement`. The example release tag in `command.txt` and the enhancement Compose override is `v07`; Bake defaults to `latest` unless `RELEASE_VERSION` is set. Image tags are project releases, not ComfyUI versions.
+This guide covers Bake target `enhance`, Docker target `final-enhance`, and image `momensirribrick/general-enhancement`. The published release is `v07`, which the enhancement Compose override runs; `command.txt` uses `v08` for the next one. Bake tags the image `latest` unless `RELEASE_VERSION` is set. Image tags are project releases, not ComfyUI versions.
 
 ## Workflow audited
 
@@ -54,13 +54,38 @@ Not verified, or found wrong:
 - **Negative embeddings.** Neither file is bundled. ComfyUI logs `embedding:easynegative, does not exist, ignoring`. `epiCNegative` is never looked up in either graph: its token is written `,embedding:epiCNegative,`, and ComfyUI only treats a word as an embedding when it starts with `embedding:`.
 - **Other Docker targets.** The base and downloader stages are shared; only `final-enhance` and `final-enhance-core` were built.
 
+### Build changes after `v07` (2026-10-05)
+
+The Dockerfile and Bake file were reworked after `v07` was published. **No image has been built with its models or published from this state yet.**
+
+What changed for this image:
+
+- Everything `v07` resolved at build time is now a default: ComfyUI 0.38.0, uv 0.12.23, comfy-cli 1.22.0, the five registry nodes, the worker's `requirements.txt`, and all other Python packages through `constraints/general-enhancement-v07.txt`.
+- The llama-cpp wheel is downloaded by URL and checked against its SHA256, instead of being looked up through the GitHub API.
+- Tokens are BuildKit secrets, not build arguments.
+- The models are copied as one layer per model folder instead of one 20.8 GB layer.
+- The repeated installation blocks moved to `scripts/build/`, and the registry installer now verifies its result.
+
+Checked on 2026-10-05, with Docker Desktop 29.5.2:
+
+- `docker buildx build --check .` reports no warnings, `docker buildx bake --print` resolves all 14 targets, and the 20 unit tests pass.
+- **A complete `enhance` build without the model downloads** (`MODEL_TYPE=base`, a small file in place of the INT4 model, and a checksum list that names one small file). Every step ran: the pinned registry and Git nodes, the Nunchaku wheel, the llama-cpp wheel with a matching SHA256, the custom-node import check and the PyTorch/Nunchaku check. `pip check` reports no broken requirements.
+- **The package list of that build equals `pip-freeze-v07.txt` in 297 of 298 packages.** The exception is `posthog` 7.63.0 instead of 7.62.1: a comfy-cli dependency, installed before the constraints file applies.
+- With the real Qwen path check and no models, the last step fails and names the missing file, as intended.
+
+Not checked:
+
+- **A build with the models.** The per-folder model layers were only built from empty folders; the download steps, their retry settings and the real checksum list did not run.
+- **A GPU job, and a push or pull** of the new layer layout.
+- **A build with a token.** The secret mechanism was tested with a stand-in build only.
+
 ## 1. Prerequisites
 
 - NVIDIA CUDA GPU and a host driver compatible with CUDA 12.8. The supplied graph selects Blackwell FP4 weights; compatible non-Blackwell GPUs need the INT4 adaptation below.
 - Docker Engine/Desktop with BuildKit/Buildx and GPU access. On Linux configure [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). On Windows use Linux containers with [Docker Desktop WSL2 GPU support](https://docs.docker.com/desktop/features/gpu/).
 - Git and build-time access to GitHub, Hugging Face, Civitai, PyPI, the PyTorch wheel index, and Ubuntu repositories. Host Python 3.10+ is needed only for the included standard-library test helper; the container uses Python 3.12.
 - Sufficient disk for several large diffusion models, Qwen, the final image, and intermediate BuildKit layers. The `v07` image is 33.8 GB, and while it builds the model and environment layers also exist in the build cache; Docker Desktop's data disk grew by about 40 GB over the builds recorded here. All graphs ran on a 12 GB RTX 3060 with the INT4 weights; no minimum RAM/VRAM requirement has been measured beyond that.
-- No token is needed for the default build. Docker Desktop's builder keeps only about 20 GiB of build cache, so after a failed or finished build the large cached layers are pruned. Tag the heavy core once (see "Reuse a heavy core") before iterating on the overlay.
+- No token is needed for the default build. Docker Desktop's default setting keeps only 20 GB of build cache (`builder.gc.defaultKeepStorage` under Settings → Docker Engine), so after a failed or finished build the large cached layers are pruned and the next build downloads the models and PyTorch again. Raise that value to about 60 GB if the disk allows, or tag the heavy core once (see "Reuse a heavy core") before iterating on the overlay.
 
 Check the host first:
 
@@ -77,13 +102,13 @@ docker run --rm --gpus all nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04 nvidia-s
 | Platform | `linux/amd64`; bundled binary wheels do not target Windows or ARM. |
 | OS/CUDA | `nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04`. Use this enhancement-specific base, rather than Bake's global CUDA 12.6 default. |
 | Python | 3.12.3; the only environment is `/opt/venv` (`VIRTUAL_ENV` is set so comfy-cli installs there too). Use `/opt/venv/bin/python -m pip`. |
-| ComfyUI | Validated with **v0.38.0** (`6b747c04`), which is what `latest` resolved to on 2026-10-03. The Dockerfile default is still `latest`; pass `COMFYUI_VERSION=0.38.0` to reproduce. Another version must provide every core class in the graphs, including `GetImageSize` and Flux sampling, and support the custom-node APIs. |
+| ComfyUI | Validated with **v0.38.0** (`6b747c04`), which is what `latest` resolved to on 2026-10-03. Since 2026-10-05 `0.38.0` is the default of the Dockerfile and of Bake's `COMFYUI_VERSION`. Another version must provide every core class in the graphs, including `GetImageSize` and Flux sampling, and support the custom-node APIs. |
 | PyTorch | **2.10.0+cu128**, torchvision 0.25.0, torchaudio 2.10.0, pinned in the Bake `enhance` targets and required by the Nunchaku wheel (Torch 2.10, CUDA 12.8, Python 3.12). The newest cu128 PyTorch is already 2.11, so an unpinned build fails the final check. ComfyUI 0.38.0 logs that cu130 is needed for its optimized CUDA operations; with cu128 it uses its standard PyTorch path, and no Nunchaku or llama-cpp wheel pairing for cu130 has been validated here. |
 | ComfyUI-Nunchaku | `NUNCHAKU_COMFYUI_TAG=v1.2.1`. |
 | Nunchaku backend | `1.2.1+cu12.8torch2.10`, `cp312`, `linux_x86_64`, from the [v1.2.1 release](https://github.com/nunchaku-ai/nunchaku/releases/tag/v1.2.1). Match node/backend, Torch, CUDA, Python ABI, and quantization. |
-| llama-cpp-python | Repository `JamePeng/llama-cpp-python`, release `v0.3.30-cu128-Basic-linux-20260302`, Python tag `cp312`. The installer selects a matching Linux wheel and checks source for `Qwen3VLChatHandler` and `Qwen25VLChatHandler`; it does not test CUDA inference during the build. |
+| llama-cpp-python | Repository `JamePeng/llama-cpp-python`, release `v0.3.30-cu128-Basic-linux-20260302`, wheel `llama_cpp_python-0.3.30+cu128.basic-cp312-cp312-linux_x86_64.whl`. [scripts/build/install-llama-vision.sh](scripts/build/install-llama-vision.sh) downloads that wheel by URL, checks its SHA256, and checks the source for `Qwen3VLChatHandler` and `Qwen25VLChatHandler`; it does not test CUDA inference during the build. |
 
-Do not select an arbitrary old ComfyUI or upgrade Torch independently. Registry nodes are still resolved at build time; the `v07` build got rgthree-comfy 1.0.2608210019, comfyui-custom-scripts 1.2.5, comfyui-impact-pack 8.28.3, comfyui-impact-subpack 1.3.5 and comfyui-easy-use 1.3.6. Other resolved versions: runpod 1.12.0, numpy 2.3.2, transformers 5.18.0, diffusers 0.40.0, ultralytics 8.4.172, OpenCV 5.0.0, llama-cpp-python 0.3.30. `pip check` reports no broken requirements. After changing any of these, record Git revisions, `pip freeze` and the image digest again.
+Do not select an arbitrary old ComfyUI or upgrade Torch independently. The `v07` build resolved rgthree-comfy 1.0.2608210019, comfyui-custom-scripts 1.2.5, comfyui-impact-pack 8.28.3, comfyui-impact-subpack 1.3.5 and comfyui-easy-use 1.3.6; since 2026-10-05 those versions are the defaults of the registry installation. Other versions in `v07`: runpod 1.12.0, numpy 2.3.2, transformers 5.18.0, diffusers 0.40.0, ultralytics 8.4.172, OpenCV 5.0.0, llama-cpp-python 0.3.30. `pip check` reports no broken requirements. After changing any of these, record Git revisions, `pip freeze` and the image digest again.
 
 ### GPU selection
 
@@ -160,15 +185,15 @@ SeedVR2, ControlNet, IPAdapter, and Flux2-Klein are not referenced by either gra
 
 ## 4. Custom nodes
 
-The target installs these automatically. For manual setup clone each repository under `/comfyui/custom_nodes/`, check out the listed revision, install its `requirements.txt` when present using the runtime Python, and restart ComfyUI. Registry installs resolve versions at build time. Git nodes are fetched shallowly at the pinned commit; a commit argument also accepts a branch or tag name that exists in that repository (`ComfyUI-post-processing-nodes` uses `master`, not `main`).
+The target installs these automatically. For manual setup clone each repository under `/comfyui/custom_nodes/`, check out the listed revision, install its `requirements.txt` when present using the runtime Python, and restart ComfyUI. Registry nodes are installed at a pinned version (`name@version`), and the build fails when a requested node or version is not on disk afterwards. Git nodes are fetched shallowly at the pinned commit by [scripts/build/node-git.sh](scripts/build/node-git.sh); a commit argument also accepts a branch or tag name that exists in that repository (`ComfyUI-post-processing-nodes` uses `master`, not `main`).
 
 | Repository | Build revision/install ID | Actual graph classes |
 | --- | --- | --- |
 | [cubiq/ComfyUI_essentials](https://github.com/cubiq/ComfyUI_essentials) | `ESSENTIALS_COMMIT=9d9f4bedfc9f0321c19faf71855e228c93bd0dc9` | `ImageResize+`, `GetImageSize+`, `ImageTile+`, `ImageUntile+`, `ImageListToBatch+`, `ImageFromBatch+`, `SimpleMath+`, `MaskBlur+` |
-| [pythongosssss/ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts) | Registry `comfyui-custom-scripts`, unpinned | `StringFunction\|pysssss` |
-| [ltdrdata/ComfyUI-Impact-Pack](https://github.com/ltdrdata/ComfyUI-Impact-Pack) | Registry `comfyui-impact-pack`, unpinned | `ImpactImageBatchToImageList`, `ToDetailerPipe`, `ToBasicPipe`, `FromBasicPipe`, `SAMLoader`, `FaceDetailerPipe` |
-| [ltdrdata/ComfyUI-Impact-Subpack](https://github.com/ltdrdata/ComfyUI-Impact-Subpack) | Registry `comfyui-impact-subpack`, unpinned | `UltralyticsDetectorProvider`; pair with Impact Pack |
-| [yolain/ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) | Registry `comfyui-easy-use`, unpinned | `easy imageToBase64`, `easy int`, `easy imageListToImageBatch` |
+| [pythongosssss/ComfyUI-Custom-Scripts](https://github.com/pythongosssss/ComfyUI-Custom-Scripts) | Registry `comfyui-custom-scripts`, `CUSTOM_SCRIPTS_VERSION=1.2.5` | `StringFunction\|pysssss` |
+| [ltdrdata/ComfyUI-Impact-Pack](https://github.com/ltdrdata/ComfyUI-Impact-Pack) | Registry `comfyui-impact-pack`, `IMPACT_PACK_VERSION=8.28.3` | `ImpactImageBatchToImageList`, `ToDetailerPipe`, `ToBasicPipe`, `FromBasicPipe`, `SAMLoader`, `FaceDetailerPipe` |
+| [ltdrdata/ComfyUI-Impact-Subpack](https://github.com/ltdrdata/ComfyUI-Impact-Subpack) | Registry `comfyui-impact-subpack`, `IMPACT_SUBPACK_VERSION=1.3.5` | `UltralyticsDetectorProvider`; pair with Impact Pack |
+| [yolain/ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) | Registry `comfyui-easy-use`, `EASY_USE_VERSION=1.3.6` | `easy imageToBase64`, `easy int`, `easy imageListToImageBatch` |
 | [1038lab/ComfyUI-QwenVL](https://github.com/1038lab/ComfyUI-QwenVL) | `QWENVL_COMMIT=1b67b443918801f571714bab636edc1845b7002a` | `AILab_QwenVL_GGUF` |
 | [Acly/comfyui-tooling-nodes](https://github.com/Acly/comfyui-tooling-nodes) | `TOOLING_COMMIT=b3ae4aa2d98f6ac4284ddbe261e3559c94bd652b` | `ETN_LoadImageBase64` |
 | [EllangoK/ComfyUI-post-processing-nodes](https://github.com/EllangoK/ComfyUI-post-processing-nodes) | `POST_COMMIT=c49a05254795403648f2c1774b6f5ea39f96e7d5` | `Blend` (not core `ImageBlend`) |
@@ -180,7 +205,7 @@ The remaining 28 distinct classes are ComfyUI core/extras nodes, including `GetI
 
 Not referenced by v1.19, but **required by the AZ-AI graph**:
 
-- [rgthree/rgthree-comfy](https://github.com/rgthree/rgthree-comfy), registry `rgthree-comfy`, unpinned: `Context (rgthree)`, `Context Switch (rgthree)`.
+- [rgthree/rgthree-comfy](https://github.com/rgthree/rgthree-comfy), registry `rgthree-comfy`, `RGTHREE_VERSION=1.0.2608210019`: `Context (rgthree)`, `Context Switch (rgthree)`.
 - [WASasquatch/was-node-suite-comfyui](https://github.com/WASasquatch/was-node-suite-comfyui), `WAS_COMMIT=ea935d1044ae5a26efa54ebeb18fe9020af49a45`: `Mask Crop Region`.
 
 Installed but referenced by neither graph:
@@ -198,10 +223,10 @@ git -C /comfyui/custom_nodes/ComfyUI_essentials checkout 9d9f4bedfc9f0321c19faf7
 Repeat using each table repository/revision; install a requirements file only if it exists. Registry installation in Docker uses the bundled [comfy-node-install wrapper](scripts/comfy-node-install.sh):
 
 ```bash
-comfy-node-install rgthree-comfy comfyui-custom-scripts comfyui-impact-pack comfyui-impact-subpack comfyui-easy-use
+comfy-node-install rgthree-comfy@1.0.2608210019 comfyui-custom-scripts@1.2.5 comfyui-impact-pack@8.28.3 comfyui-impact-subpack@1.3.5 comfyui-easy-use@1.3.6
 ```
 
-This calls `comfy node install --mode=remote`. Git installs instead of registry installs need their own recorded commits and do not automatically reproduce an earlier registry resolution.
+This calls `comfy node install --mode=remote` and then checks each node's folder and version. The installer alone is not enough: for a version that does not exist it prints the available versions and exits with 0.
 
 Nunchaku needs both its node repository and backend wheel. Docker also saves `https://nunchaku.tech/cdn/nunchaku_versions.json` at `/comfyui/custom_nodes/ComfyUI-nunchaku/nunchaku_versions.json`. ComfyUI-nunchaku v1.2.1 imports `apply_rotary_emb` from ComfyUI's Qwen-Image model; on a ComfyUI release that does not export it (v0.24.0, for example) the whole node package fails to import. The build detects that case and patches `models/qwenimage.py` to use `comfy.ldm.flux.math.apply_rope1`; on releases that export the function, such as v0.38.0, it leaves the node untouched. Qwen GGUF needs both its node and the vision-capable llama-cpp wheel; Transformers alone does not provide that backend.
 
@@ -213,12 +238,12 @@ The [Dockerfile](Dockerfile) defines the installation order:
 - Bootstrap: `uv`, `comfy-cli`, `pip`, `setuptools`, `wheel`; configured CUDA Torch/torchvision/torchaudio. The requested PyTorch build is installed first and comfy-cli runs with `--skip-torch-or-directml`, so there is one PyTorch/CUDA stack in the image.
 - One Python environment. The base stage sets `VIRTUAL_ENV=/opt/venv`. comfy-cli only uses an existing environment when that variable is set; with `PATH` alone it created a second venv at `/comfyui/.venv` and installed PyTorch, ComfyUI's requirements and all registry-node requirements there, while the entrypoint ran `/opt/venv/bin/python`. The build now fails if `/comfyui/.venv` appears.
 - ComfyUI's `/comfyui/requirements.txt`, installed into `/opt/venv` by comfy-cli and re-synced in the shared final stage and enhancement overlay.
-- Worker: `runpod`, `requests`, `websocket-client`, unpinned in Docker. Repository `requirements.txt` separately requests `runpod~=1.7.12`; it is not a complete Docker environment lock and is not used by that Docker install command.
+- Worker: `runpod`, `requests` and `websocket-client` at the versions in the repository's `requirements.txt`, which the Docker build installs.
 - Every installed custom node's requirements when present; enhancement overlay adds `piexif`, `ultralytics`, `segment-anything`, `dill`.
 - [Nunchaku node requirements at v1.2.1](https://github.com/nunchaku-ai/ComfyUI-nunchaku/blob/v1.2.1/requirements.txt): `diffusers>=0.35`, `transformers>=4.54`, `sentencepiece`, `protobuf`, `huggingface_hub>=0.34`, `tomli`, `peft>=0.17`, `accelerate>=1.10`, `insightface`, `opencv-python`, `facexlib`, `onnxruntime`, `timm`, plus the compiled Nunchaku wheel.
 - [QwenVL current requirements](https://github.com/1038lab/ComfyUI-QwenVL/blob/main/requirements.txt): `transformers`, `torch`, `huggingface-hub`, `hf_xet`, `psutil`, `numpy`, `Pillow`, `opencv-python`, `bitsandbytes`, `accelerate`; vision GGUF separately uses llama-cpp-python. The manifest notes Transformers >=4.57 for the Qwen3-VL HF backend; this graph uses GGUF.
 
-There is no complete pinned Python lock. Binary availability can change; the runtime base lacks a full compiler/CUDA development toolchain. If an upstream package requires a source build, select a compatible wheel or explicitly add its documented build dependencies. Do not assume arbitrary pip upgrades remain Nunchaku-compatible.
+The package versions of `v07` are in [constraints/general-enhancement-v07.txt](constraints/general-enhancement-v07.txt), which the `enhance` targets pass as `PIP_CONSTRAINTS_FILE`: it is `pip-freeze-v07.txt` without its six direct references. The base stage copies it to `/opt/pip-constraints.txt` after PyTorch is installed and sets `PIP_CONSTRAINT` and `UV_CONSTRAINT`, so ComfyUI's requirements and every custom node's requirements resolve to the recorded versions; a package that is not in the file is not restricted. Binary availability can still change; the runtime base lacks a full compiler/CUDA development toolchain. If an upstream package requires a source build, select a compatible wheel or explicitly add its documented build dependencies. Do not assume arbitrary pip upgrades remain Nunchaku-compatible.
 
 `start.sh` attempts to preload `libtcmalloc`, but this target does not explicitly install its OS package. An empty preload is not itself a missing workflow dependency; add/verify the allocator separately if desired.
 
@@ -236,12 +261,15 @@ PowerShell: `Copy-Item .env.example .env`. Populate tokens without committing `.
 
 | Variable | Purpose/default |
 | --- | --- |
-| `HUGGINGFACE_ACCESS_TOKEN` | Optional; empty by default. Only selects the gated FLUX.1-schnell source for the Flux autoencoder; without it the identical file comes from an ungated repository. |
+| `HUGGINGFACE_ACCESS_TOKEN` | Optional environment variable, passed to the build as the secret `hf_token`. Only selects the gated FLUX.1-schnell source for the Flux autoencoder; without it the identical file comes from an ungated repository. |
 | `ENHANCE_EXTRA_MODELS` | `false`. `true` also bundles the three assets no enhancement graph selects (about 19 GB). |
-| `CIVITAI_API_TOKEN` | Only used with `ENHANCE_EXTRA_MODELS=true`: Kreamania returns HTTP 401 without it. |
+| `CIVITAI_API_TOKEN` | Environment variable, passed as the secret `civitai_token`. Only used with `ENHANCE_EXTRA_MODELS=true`: Kreamania returns HTTP 401 without it. |
 | `KREAMANIA_FP8_SHA256` | Only used with `ENHANCE_EXTRA_MODELS=true`. Optional trusted hash; empty skips Kreamania's integrity check. Repository supplies no expected hash. |
 | `FLUX_VAE_SHA256`, `FLUX_VAE_UNGATED_URL` | Expected hash of `ae.safetensors` and its ungated source. |
-| `COMFYUI_VERSION` | Dockerfile/Bake default `latest`; the validated build used `0.38.0`. Pass the version explicitly for a controlled build. |
+| `COMFYUI_VERSION` | Dockerfile/Bake default `0.38.0`, the validated release. |
+| `PIP_CONSTRAINTS_FILE` | `constraints/general-enhancement-v07.txt` for this target (set in the Bake `enhance` targets): the package versions of the `v07` image. Every pip/uv installation after PyTorch may only choose those versions. The Dockerfile default, `constraints/none.txt`, is empty. |
+| `UV_VERSION`, `COMFY_CLI_VERSION` | `0.12.23`, `1.22.0`: the versions in `v07`. |
+| `RGTHREE_VERSION`, `CUSTOM_SCRIPTS_VERSION`, `IMPACT_PACK_VERSION`, `IMPACT_SUBPACK_VERSION`, `EASY_USE_VERSION` | Registry node versions; defaults in the node table. |
 | `PYTORCH_VERSION`, `TORCHVISION_VERSION`, `TORCHAUDIO_VERSION` | `2.10.0`, `0.25.0`, `2.10.0` for this target (set in the Bake `enhance` targets). Leaving them empty installs the newest cu128 PyTorch, which no longer matches the Nunchaku wheel and fails the final check. |
 | `MODEL_TYPE` | Must be `enhance` for a fresh enhancement core. |
 | `ENHANCE_CORE_IMAGE` | Default `final-enhance-core` builds the in-file core; a compatible image reference reuses that core. |
@@ -249,7 +277,7 @@ PowerShell: `Copy-Item .env.example .env`. Populate tokens without committing `.
 | `ESSENTIALS_COMMIT`, `WAS_COMMIT` | Pinned defaults in the node table; Docker build arguments. |
 | `QWENVL_COMMIT`, `TOOLING_COMMIT`, `POST_COMMIT`, `CROP_STITCH_COMMIT`, `KJNODES_COMMIT` | Pinned to the commits in the node table; override with Docker arguments or Bake `--set`. |
 | `NUNCHAKU_COMFYUI_TAG`, `NUNCHAKU_WHEEL_URL` | Node/backend selections described above. |
-| `LLAMA_CPP_PYTHON_REPO`, `LLAMA_CPP_PYTHON_TAG`, `LLAMA_CPP_PYTHON_PYTAG` | Vision wheel selection described above. |
+| `LLAMA_CPP_WHEEL_URL`, `LLAMA_CPP_WHEEL_SHA256` | Vision wheel and its checksum, described above. |
 | `FLUXMANIA_SVDQ_INT4_URL` | Overlay INT4 download source from the model table. |
 
 Compose loads `.env` at runtime; Docker does not automatically populate build arguments from it. Load its values into the current shell:
@@ -273,7 +301,7 @@ Get-Content .env | ForEach-Object {
 $env:RELEASE_VERSION = 'v07'
 ```
 
-The default build needs no token. When tokens are supplied they are plain build arguments, not BuildKit secret mounts, and the optional Kreamania step can print a token-bearing Civitai URL; handle logs/cache accordingly. The model stages are not part of the final image, so its history does not contain them. Runtime inference needs no download credentials when all files are present.
+The default build needs no token. Tokens are BuildKit secrets, not build arguments: Bake passes `HUGGINGFACE_ACCESS_TOKEN` and `CIVITAI_API_TOKEN` as the secrets `hf_token` and `civitai_token` when the variables are set, so they are not stored in the build cache, the image history or the output of `bake --print`. With plain `docker buildx build`, add `--secret id=hf_token,env=HUGGINGFACE_ACCESS_TOKEN`; `--build-arg HUGGINGFACE_ACCESS_TOKEN` no longer has any effect. The steps that read a token do not echo their commands, and the tokenized Kreamania request is quiet. Runtime inference needs no download credentials when all files are present.
 
 ## 7. Build
 
@@ -290,24 +318,25 @@ docker buildx build --platform linux/amd64 --load \
   --build-arg PYTORCH_VERSION=2.10.0 \
   --build-arg TORCHVISION_VERSION=0.25.0 \
   --build-arg TORCHAUDIO_VERSION=2.10.0 \
+  --build-arg PIP_CONSTRAINTS_FILE=constraints/general-enhancement-v07.txt \
   --build-arg MODEL_TYPE=enhance .
 ```
 
-This is the command the `v07` image was built with. Add `--build-arg HUGGINGFACE_ACCESS_TOKEN` to take the autoencoder from the gated repository, or `--build-arg ENHANCE_EXTRA_MODELS=true --build-arg CIVITAI_API_TOKEN --build-arg KREAMANIA_FP8_SHA256` for the optional assets.
+Without the `PIP_CONSTRAINTS_FILE` line this is the command the `v07` image was built with; that line makes a rebuild choose the same package versions. Add `--secret id=hf_token,env=HUGGINGFACE_ACCESS_TOKEN` to take the autoencoder from the gated repository, or `--build-arg ENHANCE_EXTRA_MODELS=true --build-arg KREAMANIA_FP8_SHA256 --secret id=civitai_token,env=CIVITAI_API_TOKEN` for the optional assets.
 
-For PowerShell replace `\` continuations with backticks or use this one-line Bake equivalent after setting `RELEASE_VERSION` (the `enhance` targets already pin PyTorch):
+For PowerShell replace `\` continuations with backticks or use this one-line Bake equivalent (the `enhance` targets already pin ComfyUI, PyTorch and the constraints file):
 
 ```powershell
-$env:COMFYUI_VERSION = '0.38.0'; docker buildx bake -f docker-bake.hcl enhance --load
+$env:RELEASE_VERSION = 'v08'; docker buildx bake -f docker-bake.hcl enhance --load
 ```
 
-Invoke only `enhance`, not Bake's default group of unrelated builds. Stage chain: `base → final → final-enhance-core → final-enhance`, with models copied in from `downloader`. The downloader stage is built from the CUDA base image, not from `base`, so a ComfyUI or PyTorch change reuses the cached model downloads.
+Bake's default group is `enhance` alone; every other image has to be named. Stage chain: `base → final → final-enhance-core → final-enhance`, with models copied in from `downloader`. The downloader stage is built from the CUDA base image, not from `base`, so a ComfyUI or PyTorch change reuses the cached model downloads. The models are copied as one layer per folder of `/comfyui/models` (`COPY --link`), so a changed or added model replaces only its own folder's layer when the image is pushed or pulled.
 
 The last overlay step is a gate. The build fails if PyTorch or its CUDA version no longer matches the ABI in the Nunchaku wheel's version tag, if the compiled Nunchaku extension does not import, if a workspace venv exists, or if any file in `models.sha256` is missing or has a different hash.
 
 ### Required build context/image files
 
-Keep these repository paths: `Dockerfile`, `scripts/comfy-node-install.sh`, `scripts/comfy-manager-set-mode.sh`, `src/extra_model_paths.yaml`, `src/start.sh`, `src/network_volume.py`, `handler.py`, `test_input.json`, `workflows/general-enhancement/models.sha256`, and `custom_nodes/momi_gpu_model_selector/`. Linux scripts need LF endings; CRLF in `/start.sh` can prevent startup. `.dockerignore` controls local asset inclusion.
+Keep these repository paths: `Dockerfile`, `requirements.txt`, `constraints/`, `scripts/build/`, `scripts/comfy-node-install.sh`, `scripts/comfy-manager-set-mode.sh`, `src/extra_model_paths.yaml`, `src/start.sh`, `src/network_volume.py`, `handler.py`, `test_input.json`, `workflows/general-enhancement/models.sha256`, and `custom_nodes/momi_gpu_model_selector/`. Linux scripts need LF endings; CRLF in `/start.sh` can prevent startup. `.dockerignore` controls local asset inclusion.
 
 The final overlay installs dependency fixes, INT4 Fluxmania, the local GPU selector, CropAndStitch, and KJNodes. Worker files are copied from the small `runtime-files` stage last for fast handler rebuilds. The workflow and test helper are host-side artifacts, **not baked into the image**; submit the graph with each request. The baked `test_input.json` is a generic example, not an enhancement test.
 
@@ -352,8 +381,8 @@ Port 8000 is the worker API; 8188 is ComfyUI. `SERVE_API_LOCALLY=true` starts Co
 The base Compose currently selects a Flux2-Klein image. Use the enhancement override, whose filename says v04 but whose image is v07:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.enhance-v04.test.override.yml config
-docker compose -f docker-compose.yml -f docker-compose.enhance-v04.test.override.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.enhance.override.yml config
+docker compose -f docker-compose.yml -f docker-compose.enhance.override.yml up -d
 ```
 
 Inspect resolved config locally: confirm enhancement image, GPU reservation, and host ports. Port lists can merge: the override adds 8001/8189 alongside base 8000/8188. Set helper URLs to the published ports. Compose requires `.env`, uses `pull_policy: never` (build/pull first), and mounts `./data/comfyui/output` and `./data/runpod-volume`. Avoid conflicts with another container using those ports.

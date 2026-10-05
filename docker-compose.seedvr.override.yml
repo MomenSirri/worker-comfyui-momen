@@ -1,0 +1,6 @@
+services:
+  comfyui-worker:
+    image: momensirribrick/seedvr:v07
+    ports:
+      - "8002:8000"
+      - "8190:8188"

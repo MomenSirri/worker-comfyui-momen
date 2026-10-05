@@ -1,6 +1,9 @@
 # --------------------------------------------------
 # Environment setup
 # --------------------------------------------------
+# Tokens are optional for the two AZ-AI images (enhance, seedvr). They are needed
+# for flux2-klein, refrence_gen_sdxl_flux2_klein, sd3 and flux1-schnell.
+#
 # 1) Copy .env.example -> .env
 # 2) Fill your keys in .env
 #
@@ -13,42 +16,36 @@
 #
 # Bash/Zsh:
 #   set -a && source .env && set +a
+#
+# Bake passes HUGGINGFACE_ACCESS_TOKEN and CIVITAI_API_TOKEN to the build as
+# secrets when they are set. They are not build arguments any more:
+# "--build-arg HUGGINGFACE_ACCESS_TOKEN" has no effect.
 
 # --------------------------------------------------
-# Docker build examples (no hardcoded secrets)
+# Builds (Bake). Each image is tens of gigabytes: name the target.
 # --------------------------------------------------
 
-# seedvr
-docker build --target final-seedvr -t momensirribrick/seedvr:v01 \
-  --build-arg BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04 \
-  --build-arg COMFYUI_VERSION=latest \
-  --build-arg CUDA_VERSION_FOR_COMFY= \
-  --build-arg ENABLE_PYTORCH_UPGRADE=true \
-  --build-arg PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 \
-  --build-arg MODEL_TYPE=seedvr \
-  --build-arg HUGGINGFACE_ACCESS_TOKEN \
-  .
+# general-enhancement (AZ-AI enhancement worker). RELEASE_VERSION is the tag.
+RELEASE_VERSION=v08 docker buildx bake -f docker-bake.hcl enhance --load
 
-# flux2-klein
-docker build --target final-flux2-klein -t momensirribrick/flux2-klein9b:v04 \
-  --build-arg BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04 \
-  --build-arg COMFYUI_VERSION=latest \
-  --build-arg CUDA_VERSION_FOR_COMFY= \
-  --build-arg ENABLE_PYTORCH_UPGRADE=true \
-  --build-arg PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 \
-  --build-arg MODEL_TYPE=flux2-klein \
-  --build-arg HUGGINGFACE_ACCESS_TOKEN \
-  .
+# seedvr (AZ-AI upscale worker). SEEDVR_TAG is the tag; v01-v06 exist on Docker Hub.
+SEEDVR_TAG=v07 docker buildx bake -f docker-bake.hcl seedvr --load
 
-# flux2-klein via bake
-docker buildx bake -f docker-bake.hcl flux2-klein-cuda12-8-1 --push
+# flux2-klein. Needs the LoRA files in ./models/loras and a Hugging Face token.
+FLUX2_KLEIN_TAG=v07 docker buildx bake -f docker-bake.hcl flux2-klein-cuda12-8-1 --load
+
+# Use --push instead of --load to publish. A push to an existing tag replaces it.
+
+# PowerShell sets variables separately:
+#   $env:RELEASE_VERSION = 'v08'; docker buildx bake -f docker-bake.hcl enhance --load
+
+# --------------------------------------------------
+# The same builds with plain docker buildx build
+# --------------------------------------------------
 
 # general-enhancement
-# No tokens are needed. PyTorch must stay on 2.10.0: the bundled Nunchaku wheel is built for it.
-# Add --build-arg ENHANCE_EXTRA_MODELS=true (plus CIVITAI_API_TOKEN / KREAMANIA_FP8_SHA256)
-# only to bundle the models that no enhancement graph selects.
 docker buildx build --platform linux/amd64 --load \
-  --target final-enhance -t momensirribrick/general-enhancement:v07 \
+  --target final-enhance -t momensirribrick/general-enhancement:v08 \
   --build-arg BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04 \
   --build-arg COMFYUI_VERSION=0.38.0 \
   --build-arg CUDA_VERSION_FOR_COMFY= \
@@ -57,23 +54,52 @@ docker buildx build --platform linux/amd64 --load \
   --build-arg PYTORCH_VERSION=2.10.0 \
   --build-arg TORCHVISION_VERSION=0.25.0 \
   --build-arg TORCHAUDIO_VERSION=2.10.0 \
+  --build-arg PIP_CONSTRAINTS_FILE=constraints/general-enhancement-v07.txt \
   --build-arg MODEL_TYPE=enhance \
   .
+
+# seedvr
+docker buildx build --platform linux/amd64 --load \
+  --target final-seedvr -t momensirribrick/seedvr:v07 \
+  --build-arg BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04 \
+  --build-arg COMFYUI_VERSION=0.24.1 \
+  --build-arg CUDA_VERSION_FOR_COMFY= \
+  --build-arg ENABLE_PYTORCH_UPGRADE=true \
+  --build-arg PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu128 \
+  --build-arg PYTORCH_VERSION=2.10.0 \
+  --build-arg TORCHVISION_VERSION=0.25.0 \
+  --build-arg TORCHAUDIO_VERSION=2.10.0 \
+  --build-arg MODEL_TYPE=seedvr \
+  .
+
+# A gated model needs the token as a secret:
+#   --secret id=hf_token,env=HUGGINGFACE_ACCESS_TOKEN
+#   --secret id=civitai_token,env=CIVITAI_API_TOKEN
 
 # --------------------------------------------------
 # Faster rebuild flow for general-enhancement
 # --------------------------------------------------
 # 1) Build/push heavy core once
-docker buildx bake -f docker-bake.hcl enhance-core --push
+RELEASE_VERSION=v08 docker buildx bake -f docker-bake.hcl enhance-core --push
 
 # 2) Build/push thin final image (defaults to local stage alias)
-docker buildx bake -f docker-bake.hcl enhance --push
+RELEASE_VERSION=v08 docker buildx bake -f docker-bake.hcl enhance --push
 
 # 3) On a fresh machine (or after Docker reinstall), skip heavy rebuild:
 #    reuse pushed core image and rebuild only thin final-enhance overlay.
-docker buildx bake -f docker-bake.hcl enhance \
-  --set enhance.args.ENHANCE_CORE_IMAGE=momensirribrick/general-enhancement:core-v01 \
+RELEASE_VERSION=v08 docker buildx bake -f docker-bake.hcl enhance \
+  --set enhance.args.ENHANCE_CORE_IMAGE=momensirribrick/general-enhancement:core-v08 \
   --push
 
-# local compose run
-docker-compose up --build
+# --------------------------------------------------
+# Checks that build nothing
+# --------------------------------------------------
+docker buildx build --check .
+docker buildx bake -f docker-bake.hcl --print enhance seedvr
+python -m unittest discover -s tests -p "test_*.py"
+
+# --------------------------------------------------
+# Local run with Compose (images must exist locally)
+# --------------------------------------------------
+docker compose -f docker-compose.yml -f docker-compose.enhance.override.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.seedvr.override.yml up -d

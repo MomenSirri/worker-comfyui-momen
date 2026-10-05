@@ -3,7 +3,8 @@ services:
     image: momensirribrick/flux2-klein9b:v04
     pull_policy: never
     env_file:
-      - .env
+      - path: .env
+        required: false
     deploy:
       resources:
         reservations:

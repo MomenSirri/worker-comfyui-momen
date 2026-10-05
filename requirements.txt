@@ -1,4 +1,4 @@
-# fix some problems with the queue
-runpod~=1.7.12
-websocket-client
-requests
+# Python packages the worker handler needs. The Docker image installs exactly this file.
+runpod==1.12.0
+requests==2.34.2
+websocket-client==1.9.2

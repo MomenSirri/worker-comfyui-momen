@@ -6,20 +6,38 @@ variable "DOCKERHUB_IMG" {
   default = "worker-comfyui"
 }
 
-variable "FLUX2_KLEIN_IMG" {
-  default = "flux2-klein9b"
-}
-
 variable "RELEASE_VERSION" {
   default = "latest"
 }
 
-variable "FLUX2_KLEIN_TAG" {
-  default = "v04"
+variable "FLUX2_KLEIN_IMG" {
+  default = "flux2-klein9b"
 }
 
+# Image tags. Docker Hub already has flux2-klein9b:v01-v06 and seedvr:v01-v06, and a
+# push to an existing tag replaces it. Set the next free tag for every release.
+variable "FLUX2_KLEIN_TAG" {
+  default = "v07"
+}
+
+variable "SEEDVR_TAG" {
+  default = "v07"
+}
+
+# ComfyUI releases. `latest` is deliberately not a default: a production image must
+# not change because a new ComfyUI was released.
+#   0.38.0 is the release the General Enhancement image v07 was validated with.
+#   0.24.1 is the release in the published seedvr:v04 and flux2-klein9b:v06 images.
 variable "COMFYUI_VERSION" {
-  default = "latest"
+  default = "0.38.0"
+}
+
+variable "SEEDVR_COMFYUI_VERSION" {
+  default = "0.24.1"
+}
+
+variable "FLUX2_KLEIN_COMFYUI_VERSION" {
+  default = "0.24.1"
 }
 
 # Global defaults for standard CUDA 12.6.3 images
@@ -39,14 +57,6 @@ variable "PYTORCH_INDEX_URL" {
   default = ""
 }
 
-variable "HUGGINGFACE_ACCESS_TOKEN" {
-  default = ""
-}
-
-variable "CIVITAI_API_TOKEN" {
-  default = ""
-}
-
 variable "KREAMANIA_FP8_SHA256" {
   default = ""
 }
@@ -59,320 +69,197 @@ variable "ENHANCE_EXTRA_MODELS" {
 variable "ENHANCE_CORE_IMAGE" {
   # Default to local build stage alias; override with a pushed core image to skip heavy rebuilds.
   # Example override:
-  # --set enhance.args.ENHANCE_CORE_IMAGE=momensirribrick/general-enhancement:core-v01
+  # --set enhance.args.ENHANCE_CORE_IMAGE=momensirribrick/general-enhancement:core-v07
   default = "final-enhance-core"
 }
 
+# `docker buildx bake` without a target builds only the General Enhancement image.
+# Name every other image explicitly: each one is tens of gigabytes.
 group "default" {
-  targets = ["base", "sdxl", "sd3", "flux1-schnell", "flux1-dev", "flux1-dev-fp8", "z-image-turbo", "flux2-klein", "refrence_gen_sdxl_flux2_klein", "base-cuda12-8-1", "flux2-klein-cuda12-8-1", "refrence_gen_sdxl_flux2_klein-cuda12-8-1", "seedvr", "seedvr-cuda12-8-1", "enhance-core", "enhance"]
+  targets = ["enhance"]
+}
+
+# The two AZ-AI workers: enhancement and upscale.
+group "azai" {
+  targets = ["enhance", "seedvr"]
+}
+
+# Shared by every target. Access tokens are passed as BuildKit secrets, read from
+# the environment variables HUGGINGFACE_ACCESS_TOKEN and CIVITAI_API_TOKEN when
+# they are set. They are never build arguments.
+target "_common" {
+  context    = "."
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  secret = [
+    "id=hf_token,env=HUGGINGFACE_ACCESS_TOKEN",
+    "id=civitai_token,env=CIVITAI_API_TOKEN",
+  ]
+}
+
+# Standard CUDA 12.6 images: comfy-cli installs PyTorch.
+target "_cuda126" {
+  inherits = ["_common"]
+  args = {
+    BASE_IMAGE             = "${BASE_IMAGE}"
+    COMFYUI_VERSION        = "${COMFYUI_VERSION}"
+    CUDA_VERSION_FOR_COMFY = "${CUDA_VERSION_FOR_COMFY}"
+    ENABLE_PYTORCH_UPGRADE = "${ENABLE_PYTORCH_UPGRADE}"
+    PYTORCH_INDEX_URL      = "${PYTORCH_INDEX_URL}"
+  }
+}
+
+# CUDA 12.8.1 images (RTX 50-series): PyTorch comes from the cu128 wheel index.
+target "_cuda128" {
+  inherits = ["_common"]
+  args = {
+    BASE_IMAGE             = "nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04"
+    COMFYUI_VERSION        = "${COMFYUI_VERSION}"
+    CUDA_VERSION_FOR_COMFY = ""
+    ENABLE_PYTORCH_UPGRADE = "true"
+    PYTORCH_INDEX_URL      = "https://download.pytorch.org/whl/cu128"
+  }
+}
+
+# The bundled Nunchaku wheel is built for PyTorch 2.10 / CUDA 12.8. The final
+# build check fails when PyTorch does not match it.
+target "_cuda128_torch210" {
+  inherits = ["_cuda128"]
+  args = {
+    PYTORCH_VERSION     = "2.10.0"
+    TORCHVISION_VERSION = "0.25.0"
+    TORCHAUDIO_VERSION  = "2.10.0"
+  }
 }
 
 target "base" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "base"
-  platforms = ["linux/amd64"]
+  inherits = ["_cuda126"]
+  target   = "base"
   args = {
-    BASE_IMAGE = "${BASE_IMAGE}"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = "${CUDA_VERSION_FOR_COMFY}"
-    ENABLE_PYTORCH_UPGRADE = "${ENABLE_PYTORCH_UPGRADE}"
-    PYTORCH_INDEX_URL = "${PYTORCH_INDEX_URL}"
     MODEL_TYPE = "base"
   }
   tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-base"]
 }
 
-target "sdxl" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "final"
-  args = {
-    BASE_IMAGE = "${BASE_IMAGE}"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = "${CUDA_VERSION_FOR_COMFY}"
-    ENABLE_PYTORCH_UPGRADE = "${ENABLE_PYTORCH_UPGRADE}"
-    PYTORCH_INDEX_URL = "${PYTORCH_INDEX_URL}"
-    MODEL_TYPE = "sdxl"
-  }
-  tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-sdxl"]
-  inherits = ["base"]
-}
-
 target "sd3" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "final"
+  inherits = ["_cuda126"]
+  target   = "final"
   args = {
-    BASE_IMAGE = "${BASE_IMAGE}"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = "${CUDA_VERSION_FOR_COMFY}"
-    ENABLE_PYTORCH_UPGRADE = "${ENABLE_PYTORCH_UPGRADE}"
-    PYTORCH_INDEX_URL = "${PYTORCH_INDEX_URL}"
     MODEL_TYPE = "sd3"
-    HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
   }
   tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-sd3"]
-  inherits = ["base"]
 }
 
 target "flux1-schnell" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "final"
+  inherits = ["_cuda126"]
+  target   = "final"
   args = {
-    BASE_IMAGE = "${BASE_IMAGE}"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = "${CUDA_VERSION_FOR_COMFY}"
-    ENABLE_PYTORCH_UPGRADE = "${ENABLE_PYTORCH_UPGRADE}"
-    PYTORCH_INDEX_URL = "${PYTORCH_INDEX_URL}"
     MODEL_TYPE = "flux1-schnell"
-    HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
   }
   tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-flux1-schnell"]
-  inherits = ["base"]
 }
 
 target "flux1-dev" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "final"
+  inherits = ["_cuda126"]
+  target   = "final"
   args = {
-    BASE_IMAGE = "${BASE_IMAGE}"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = "${CUDA_VERSION_FOR_COMFY}"
-    ENABLE_PYTORCH_UPGRADE = "${ENABLE_PYTORCH_UPGRADE}"
-    PYTORCH_INDEX_URL = "${PYTORCH_INDEX_URL}"
     MODEL_TYPE = "flux1-dev"
-    HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
   }
   tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-flux1-dev"]
-  inherits = ["base"]
-}
-
-target "flux1-dev-fp8" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "final"
-  args = {
-    BASE_IMAGE = "${BASE_IMAGE}"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = "${CUDA_VERSION_FOR_COMFY}"
-    ENABLE_PYTORCH_UPGRADE = "${ENABLE_PYTORCH_UPGRADE}"
-    PYTORCH_INDEX_URL = "${PYTORCH_INDEX_URL}"
-    MODEL_TYPE = "flux1-dev-fp8"
-  }
-  tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-flux1-dev-fp8"]
-  inherits = ["base"]
 }
 
 target "z-image-turbo" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "final"
+  inherits = ["_cuda126"]
+  target   = "final"
   args = {
-    BASE_IMAGE = "${BASE_IMAGE}"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = "${CUDA_VERSION_FOR_COMFY}"
-    ENABLE_PYTORCH_UPGRADE = "${ENABLE_PYTORCH_UPGRADE}"
-    PYTORCH_INDEX_URL = "${PYTORCH_INDEX_URL}"
     MODEL_TYPE = "z-image-turbo"
   }
   tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-z-image-turbo"]
-  inherits = ["base"]
 }
 
 target "base-cuda12-8-1" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "base"
-  platforms = ["linux/amd64"]
+  inherits = ["_cuda128"]
+  target   = "base"
   args = {
-    BASE_IMAGE = "nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = ""
-    ENABLE_PYTORCH_UPGRADE = "true"
-    PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
     MODEL_TYPE = "base"
   }
   tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-base-cuda12.8.1"]
 }
 
-
 target "flux2-klein" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "final-flux2-klein"
+  inherits = ["_cuda126"]
+  target   = "final-flux2-klein"
   args = {
-    BASE_IMAGE = "${BASE_IMAGE}"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = "${CUDA_VERSION_FOR_COMFY}"
-    ENABLE_PYTORCH_UPGRADE = "${ENABLE_PYTORCH_UPGRADE}"
-    PYTORCH_INDEX_URL = "${PYTORCH_INDEX_URL}"
-    MODEL_TYPE = "flux2-klein"
-    HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
+    COMFYUI_VERSION = "${FLUX2_KLEIN_COMFYUI_VERSION}"
+    MODEL_TYPE      = "flux2-klein"
   }
   tags = ["${DOCKERHUB_REPO}/${FLUX2_KLEIN_IMG}:${FLUX2_KLEIN_TAG}-cuda12.6"]
-  inherits = ["base"]
 }
 
-# Convenience target for RTX 5090 (CUDA 12.8.1 + cu128 torch wheels)
+# FLUX.2 Klein 9B with its LoRAs (CUDA 12.8.1 + cu128 torch wheels). Needs the
+# LoRA files in ./models/loras and a Hugging Face token for the gated weights.
 target "flux2-klein-cuda12-8-1" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "final-flux2-klein"
-
-  platforms = ["linux/amd64"]
+  inherits = ["_cuda128"]
+  target   = "final-flux2-klein"
   args = {
-    BASE_IMAGE = "nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = ""
-    ENABLE_PYTORCH_UPGRADE = "true"
-    PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
-    MODEL_TYPE = "flux2-klein"
-    HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
-
-    LLAMA_CPP_PYTHON_REPO = "JamePeng/llama-cpp-python"
-    LLAMA_CPP_PYTHON_TAG  = "v0.3.30-cu128-Basic-linux-20260302"
-    LLAMA_CPP_PYTHON_PYTAG = "cp312"
+    COMFYUI_VERSION = "${FLUX2_KLEIN_COMFYUI_VERSION}"
+    MODEL_TYPE      = "flux2-klein"
   }
-
   tags = ["${DOCKERHUB_REPO}/${FLUX2_KLEIN_IMG}:${FLUX2_KLEIN_TAG}"]
-  inherits = ["base"]
 }
 
 target "refrence_gen_sdxl_flux2_klein" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "final-refrence_gen_sdxl_flux2_klein"
+  inherits = ["_cuda126"]
+  target   = "final-refrence_gen_sdxl_flux2_klein"
   args = {
-    BASE_IMAGE = "${BASE_IMAGE}"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = "${CUDA_VERSION_FOR_COMFY}"
-    ENABLE_PYTORCH_UPGRADE = "${ENABLE_PYTORCH_UPGRADE}"
-    PYTORCH_INDEX_URL = "${PYTORCH_INDEX_URL}"
     MODEL_TYPE = "refrence_gen_sdxl_flux2_klein"
-    HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
-
-    LLAMA_CPP_PYTHON_REPO = "JamePeng/llama-cpp-python"
-    LLAMA_CPP_PYTHON_TAG  = "v0.3.30-cu128-Basic-linux-20260302"
-    LLAMA_CPP_PYTHON_PYTAG = "cp312"
   }
   tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-refrence_gen_sdxl_flux2_klein"]
-  inherits = ["base"]
 }
 
 target "refrence_gen_sdxl_flux2_klein-cuda12-8-1" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "final-refrence_gen_sdxl_flux2_klein"
-  platforms = ["linux/amd64"]
+  inherits = ["_cuda128"]
+  target   = "final-refrence_gen_sdxl_flux2_klein"
   args = {
-    BASE_IMAGE = "nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = ""
-    ENABLE_PYTORCH_UPGRADE = "true"
-    PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
     MODEL_TYPE = "refrence_gen_sdxl_flux2_klein"
-    HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
-
-    LLAMA_CPP_PYTHON_REPO = "JamePeng/llama-cpp-python"
-    LLAMA_CPP_PYTHON_TAG  = "v0.3.30-cu128-Basic-linux-20260302"
-    LLAMA_CPP_PYTHON_PYTAG = "cp312"
   }
   tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-refrence_gen_sdxl_flux2_klein-cuda12.8.1"]
-  inherits = ["base"]
 }
 
+# SeedVR2 upscaler: the AZ-AI upscale worker. Needs no token and no local files.
 target "seedvr" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "final-seedvr"
+  inherits = ["_cuda128_torch210"]
+  target   = "final-seedvr"
   args = {
-    BASE_IMAGE = "${BASE_IMAGE}"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = "${CUDA_VERSION_FOR_COMFY}"
-    ENABLE_PYTORCH_UPGRADE = "${ENABLE_PYTORCH_UPGRADE}"
-    PYTORCH_INDEX_URL = "${PYTORCH_INDEX_URL}"
-    MODEL_TYPE = "seedvr"
-    HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
-
-    NUNCHAKU_REPO = "nunchaku-ai/nunchaku"
-    NUNCHAKU_TAG  = "v1.0.2"
+    COMFYUI_VERSION = "${SEEDVR_COMFYUI_VERSION}"
+    MODEL_TYPE      = "seedvr"
   }
-  tags = ["${DOCKERHUB_REPO}/${DOCKERHUB_IMG}:${RELEASE_VERSION}-seedvr"]
-  inherits = ["base"]
+  tags = ["${DOCKERHUB_REPO}/seedvr:${SEEDVR_TAG}"]
 }
 
-
+# Earlier name of the `seedvr` target.
 target "seedvr-cuda12-8-1" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "final-seedvr"
-  platforms = ["linux/amd64"]
-  args = {
-    BASE_IMAGE = "nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = ""
-    ENABLE_PYTORCH_UPGRADE = "true"
-    PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
-    MODEL_TYPE = "seedvr"
-    HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
-
-  }
-  tags = ["${DOCKERHUB_REPO}/seedvr:v01"]
-  inherits = ["base"]
+  inherits = ["seedvr"]
 }
 
-
-target "enhance" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "final-enhance"
-  platforms = ["linux/amd64"]
-  args = {
-    BASE_IMAGE = "nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = ""
-    ENABLE_PYTORCH_UPGRADE = "true"
-    PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
-    # The bundled Nunchaku wheel is built for PyTorch 2.10 / CUDA 12.8.
-    PYTORCH_VERSION = "2.10.0"
-    TORCHVISION_VERSION = "0.25.0"
-    TORCHAUDIO_VERSION = "2.10.0"
-    MODEL_TYPE = "enhance"
-    ENHANCE_EXTRA_MODELS = "${ENHANCE_EXTRA_MODELS}"
-    HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
-    CIVITAI_API_TOKEN = "${CIVITAI_API_TOKEN}"
-    KREAMANIA_FP8_SHA256 = "${KREAMANIA_FP8_SHA256}"
-    ENHANCE_CORE_IMAGE = "${ENHANCE_CORE_IMAGE}"
-
-  }
-  tags = ["${DOCKERHUB_REPO}/general-enhancement:${RELEASE_VERSION}"]
-  inherits = ["base"]
-}
-
+# General Enhancement: the AZ-AI enhancement worker. Set RELEASE_VERSION to the tag.
 target "enhance-core" {
-  context = "."
-  dockerfile = "Dockerfile"
-  target = "final-enhance-core"
-  platforms = ["linux/amd64"]
+  inherits = ["_cuda128_torch210"]
+  target   = "final-enhance-core"
   args = {
-    BASE_IMAGE = "nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04"
-    COMFYUI_VERSION = "${COMFYUI_VERSION}"
-    CUDA_VERSION_FOR_COMFY = ""
-    ENABLE_PYTORCH_UPGRADE = "true"
-    PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
-    # The bundled Nunchaku wheel is built for PyTorch 2.10 / CUDA 12.8.
-    PYTORCH_VERSION = "2.10.0"
-    TORCHVISION_VERSION = "0.25.0"
-    TORCHAUDIO_VERSION = "2.10.0"
-    MODEL_TYPE = "enhance"
+    MODEL_TYPE           = "enhance"
+    PIP_CONSTRAINTS_FILE = "constraints/general-enhancement-v07.txt"
     ENHANCE_EXTRA_MODELS = "${ENHANCE_EXTRA_MODELS}"
-    HUGGINGFACE_ACCESS_TOKEN = "${HUGGINGFACE_ACCESS_TOKEN}"
-    CIVITAI_API_TOKEN = "${CIVITAI_API_TOKEN}"
     KREAMANIA_FP8_SHA256 = "${KREAMANIA_FP8_SHA256}"
   }
   tags = ["${DOCKERHUB_REPO}/general-enhancement:core-${RELEASE_VERSION}"]
-  inherits = ["base"]
+}
+
+target "enhance" {
+  inherits = ["enhance-core"]
+  target   = "final-enhance"
+  args = {
+    ENHANCE_CORE_IMAGE = "${ENHANCE_CORE_IMAGE}"
+  }
+  tags = ["${DOCKERHUB_REPO}/general-enhancement:${RELEASE_VERSION}"]
 }
