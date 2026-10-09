@@ -397,7 +397,7 @@ Push the final image, create a GPU Serverless endpoint using its tag/digest, and
 | --- | --- |
 | `SERVE_API_LOCALLY` | Unset/false; `true` for local API. |
 | `COMFY_LOG_LEVEL` | `DEBUG`; `INFO` is less verbose. |
-| `RUNPOD_LOG_LEVEL` | RunPod SDK log level, `DEBUG` when unset. At `DEBUG` the SDK logs the handler's whole output, which includes the presigned output URLs (or the base64 image). Set `INFO` on a production endpoint. The handler's own log lines never contain a signed query string, for inputs or outputs. |
+| `RUNPOD_LOG_LEVEL` | RunPod SDK log level. The handler sets `INFO` when it is unset or blank. At `DEBUG`, the SDK's own default, the SDK logs the handler's whole output, which includes the presigned output URLs (or the base64 image). An image built before the handler set this default, `v07` included, logs at `DEBUG` unless the endpoint sets `INFO`. The handler's own log lines do not contain the signed query string of an input image or of a result, and a failed node's message has the query string of every URL cut. Two things are not covered: ComfyUI's own output is not filtered, and a graph that ComfyUI refuses is reported as ComfyUI words it, a link inside the graph included. |
 | `COMFY_API_AVAILABLE_INTERVAL_MS`, `COMFY_API_AVAILABLE_MAX_RETRIES` | `250`, `600`; readiness checks. |
 | `COMFY_API_HEALTH_PATH` | `/object_info`. |
 | `WEBSOCKET_RECONNECT_ATTEMPTS`, `WEBSOCKET_RECONNECT_DELAY_S` | `5`, `3`; reconnect controls. |

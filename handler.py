@@ -1,10 +1,19 @@
+import os
+
+# At its default level, DEBUG, the RunPod SDK logs the handler's whole output,
+# which holds the presigned result links. The SDK reads the level once, while it
+# is imported, so the default has to be in place before that. An endpoint that
+# sets RUNPOD_LOG_LEVEL keeps its own value. A blank value counts as not set,
+# because the SDK refuses to start on one.
+if not os.environ.get("RUNPOD_LOG_LEVEL"):
+    os.environ["RUNPOD_LOG_LEVEL"] = "INFO"
+
 import runpod
 from runpod.serverless.utils import rp_upload
 import json
 import urllib.request
 import urllib.parse
 import time
-import os
 import requests
 import base64
 from io import BytesIO
@@ -150,6 +159,30 @@ def _finalize_job_result(output_images, errors=None, warnings=None):
         "Workflow produced no images.",
         details=details,
     )
+
+
+# In an absolute URL everything from the "?" on is a query string. Elsewhere, as
+# in the path-only form urllib3 reports, a "?" that leads to "name=" is taken for
+# the start of one. A query string ends at a space or at a character a URL cannot
+# hold unencoded. A single quote is not such a character, so the quote that
+# closes a quoted URL is cut with it. The lengths are bounded so that a long text
+# without spaces cannot make the search slow.
+_ABSOLUTE_URL_QUERY = re.compile(
+    r"""\b((?:https?|wss?)://[^\s"<>?]{1,2048})\?[^\s"<>]*""", re.IGNORECASE
+)
+_NAMED_QUERY = re.compile(r"""\?[^\s"<>=?]{1,256}=[^\s"<>]*""")
+
+
+def _redact_url_queries(text):
+    """
+    Cut the query string out of every URL in a text, keeping the location.
+
+    The query string of a signed link is a credential, and HTTP clients put the
+    request URL into the text of their errors.
+    """
+    text = _ABSOLUTE_URL_QUERY.sub(r"\1?[redacted]", str(text))
+    return _NAMED_QUERY.sub("?[redacted]", text)
+
 
 # ---------------------------------------------------------------------------
 # Helper: quick reachability probe of ComfyUI HTTP endpoint (port 8188)
@@ -1743,10 +1776,14 @@ def handler(job):
                     if data.get("prompt_id") != prompt_id:
                         continue
 
+                    # The message is whatever the failed node raised, and an HTTP
+                    # client error names its request URL. This text is logged,
+                    # sent as a progress update and returned to the caller.
+                    exception_message = _redact_url_queries(data.get("exception_message"))
                     error_details = (
                         f"Node Type: {data.get('node_type')}, "
                         f"Node ID: {data.get('node_id')}, "
-                        f"Message: {data.get('exception_message')}"
+                        f"Message: {exception_message}"
                     )
                     print(f"worker-comfyui - Execution error received: {error_details}")
                     errors.append(f"Workflow execution error: {error_details}")
@@ -1754,12 +1791,12 @@ def handler(job):
                         job,
                         progress_state,
                         "error",
-                        f"node={data.get('node_id')} message={data.get('exception_message')}",
+                        f"node={data.get('node_id')} message={exception_message}",
                         force=True,
                     )
                     _safe_progress_update(
                         job,
-                        f"Execution error at node {data.get('node_id')}: {data.get('exception_message')}",
+                        f"Execution error at node {data.get('node_id')}: {exception_message}",
                         progress_state,
                         force=True,
                     )
@@ -1942,7 +1979,9 @@ def handler(job):
                                     }
                                 )
                             except Exception as e:
-                                error_msg = f"Error uploading {filename} to S3: {e}"
+                                error_msg = (
+                                    f"Error uploading {filename} to S3: {_redact_url_queries(e)}"
+                                )
                                 print(f"worker-comfyui - {error_msg}")
                                 errors.append(error_msg)
                                 if "temp_file_path" in locals() and os.path.exists(
